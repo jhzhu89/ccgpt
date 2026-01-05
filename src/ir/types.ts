@@ -37,6 +37,7 @@ export type ToolChoice =
 export type ThinkingConfig = {
   type: "enabled";
   budgetTokens: number;
+  effort?: "low" | "medium" | "high";
 };
 
 export type Request = {

@@ -25,10 +25,10 @@ describe("toResponsesRequest", () => {
     vi.clearAllMocks();
   });
 
-  it("caps max_tokens to 16384", () => {
+  it("passes max_tokens through", () => {
     const ir = baseRequest({ maxTokens: 100000 });
     const result = toResponsesRequest(ir);
-    expect(result.max_output_tokens).toBe(16384);
+    expect(result.max_output_tokens).toBe(100000);
   });
 
   it("preserves max_tokens under limit", () => {
@@ -64,18 +64,19 @@ describe("toResponsesRequest", () => {
     expect(result.tool_choice).toBeUndefined();
   });
 
-  it("sets reasoning effort high when thinking enabled", () => {
+  it("sets reasoning when model supports it", () => {
     const ir = baseRequest({
-      thinking: { type: "enabled", budgetTokens: 5000 },
+      model: "gpt-5.1-codex-max",
+      thinking: { type: "enabled", budgetTokens: 5000, effort: "high" },
     });
     const result = toResponsesRequest(ir);
     expect(result.reasoning).toEqual({ effort: "high", summary: "auto" });
   });
 
-  it("sets reasoning effort medium without thinking", () => {
-    const ir = baseRequest();
+  it("omits reasoning for models that dont support summaries", () => {
+    const ir = baseRequest({ model: "gpt-4o" });
     const result = toResponsesRequest(ir);
-    expect(result.reasoning).toEqual({ effort: "medium", summary: "auto" });
+    expect(result.reasoning).toBeUndefined();
   });
 
   it("converts image content to input_image", () => {

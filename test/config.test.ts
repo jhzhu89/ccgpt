@@ -17,17 +17,17 @@ describe("resolveModel", () => {
 
   it("maps haiku to default tier", async () => {
     const { resolveModel } = await import("../src/config/index.js");
-    expect(resolveModel("claude-3-haiku-20240307")).toBe("gpt-5-nano");
+    expect(resolveModel("claude-3-haiku-20240307")).toBe("gpt-5-mini");
   });
 
   it("maps sonnet to default tier", async () => {
     const { resolveModel } = await import("../src/config/index.js");
-    expect(resolveModel("claude-3-5-sonnet-20241022")).toBe("gpt-5");
+    expect(resolveModel("claude-3-5-sonnet-20241022")).toBe("gpt-5.2");
   });
 
   it("maps opus to default tier", async () => {
     const { resolveModel } = await import("../src/config/index.js");
-    expect(resolveModel("claude-opus-4-5-20250929")).toBe("gpt-5-codex");
+    expect(resolveModel("claude-opus-4-5-20250929")).toBe("gpt-5.1-codex-max");
   });
 
   it("respects custom TIER_HAIKU", async () => {

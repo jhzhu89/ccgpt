@@ -30,7 +30,7 @@ describe("proxy", () => {
   it("streams text response", async () => {
     const stream = client.messages.stream({
       model: "claude-opus-4-5-20250929",
-      max_tokens: 100,
+      max_tokens: 1000,
       messages: [{ role: "user", content: "What is 2 + 2?" }],
     });
 
@@ -49,7 +49,7 @@ describe("proxy", () => {
   it("non-streaming text response", async () => {
     const message = await client.messages.create({
       model: "claude-opus-4-5-20250929",
-      max_tokens: 100,
+      max_tokens: 1000,
       messages: [{ role: "user", content: "What is 2 + 2?" }],
     });
 
@@ -62,7 +62,7 @@ describe("proxy", () => {
   it("tool use", async () => {
     const message = await client.messages.create({
       model: "claude-opus-4-5-20250929",
-      max_tokens: 200,
+      max_tokens: 1000,
       messages: [
         { role: "user", content: "What is 2 + 2? Use the calculator." },
       ],

@@ -4,6 +4,7 @@ import { validate, validateCountTokens } from "./anthropic/validate.js";
 import { fromRequest } from "./anthropic/from-request.js";
 import { toResponse } from "./anthropic/to-response.js";
 import { StreamTranslator } from "./anthropic/to-stream.js";
+import { handleError, streamError } from "./anthropic/error-mapper.js";
 import { toResponsesRequest } from "./openai/to-request.js";
 import { fromResponse } from "./openai/from-response.js";
 import { fromStreamEvent } from "./openai/from-stream.js";
@@ -77,20 +78,24 @@ app.post("/v1/messages", async (c) => {
 
   if (!ir.stream) {
     const openaiReq = toResponsesRequest(ir);
-    const openaiRes = await openai.responses.create(openaiReq);
-    const irRes = fromResponse(openaiRes);
-    const anthropicRes = toResponse(irRes, ir.model);
+    try {
+      const openaiRes = await openai.responses.create(openaiReq);
+      const irRes = fromResponse(openaiRes);
+      const anthropicRes = toResponse(irRes, ir.model);
 
-    logger.info(
-      {
-        reqId,
-        stopReason: irRes.stopReason,
-        inputTokens: irRes.usage.inputTokens,
-        outputTokens: irRes.usage.outputTokens,
-      },
-      "non-streaming response complete",
-    );
-    return c.json(anthropicRes);
+      logger.info(
+        {
+          reqId,
+          stopReason: irRes.stopReason,
+          inputTokens: irRes.usage.inputTokens,
+          outputTokens: irRes.usage.outputTokens,
+        },
+        "non-streaming response complete",
+      );
+      return c.json(anthropicRes);
+    } catch (error) {
+      return handleError(c, error, { reqId, model: resolvedModel });
+    }
   }
 
   c.header("Content-Type", "text/event-stream");
@@ -99,22 +104,28 @@ app.post("/v1/messages", async (c) => {
 
   return stream(c, async (s) => {
     const openaiReq = toResponsesRequest(ir);
-    const openaiStream = await openai.responses.create({
-      ...openaiReq,
-      stream: true,
-    });
+    try {
+      const openaiStream = await openai.responses.create({
+        ...openaiReq,
+        stream: true,
+      });
 
-    const translator = new StreamTranslator({ model: ir.model });
+      const translator = new StreamTranslator({ model: ir.model });
 
-    for await (const event of openaiStream) {
-      for (const irEvent of fromStreamEvent(event)) {
-        for (const sse of translator.process(irEvent)) {
-          await s.write(sse);
+      for await (const event of openaiStream) {
+        for (const irEvent of fromStreamEvent(event)) {
+          for (const sse of translator.process(irEvent)) {
+            await s.write(sse);
+          }
         }
       }
-    }
 
-    logger.info({ reqId }, "streaming response complete");
+      logger.info({ reqId }, "streaming response complete");
+    } catch (error) {
+      for (const sse of streamError(error, { reqId, model: resolvedModel })) {
+        await s.write(sse);
+      }
+    }
   });
 });
 

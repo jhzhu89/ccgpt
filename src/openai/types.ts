@@ -14,6 +14,7 @@ import type {
   ResponseReasoningSummaryTextDeltaEvent,
   ResponseReasoningSummaryTextDoneEvent,
   ResponseFailedEvent,
+  ResponseIncompleteEvent,
 } from "openai/resources/responses/responses.js";
 
 export function isCreatedEvent(
@@ -92,4 +93,10 @@ export function isFailedEvent(
   event: ResponseStreamEvent,
 ): event is ResponseFailedEvent {
   return event.type === "response.failed";
+}
+
+export function isIncompleteEvent(
+  event: ResponseStreamEvent,
+): event is ResponseIncompleteEvent {
+  return event.type === "response.incomplete";
 }
