@@ -1,7 +1,22 @@
 {
   "name": "@jhzhu89/m2r",
   "version": "0.1.0",
+  "description": "Anthropic Messages API to Azure OpenAI Responses API proxy",
   "type": "module",
+  "license": "MIT",
+  "author": "Jiahao Zhu <jiahzhu@outlook.com>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jhzhu89/m2r.git"
+  },
+  "keywords": [
+    "anthropic",
+    "openai",
+    "azure",
+    "proxy",
+    "claude",
+    "gpt"
+  ],
   "bin": {
     "m2r": "./dist/index.js"
   },

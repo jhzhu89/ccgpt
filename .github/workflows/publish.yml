@@ -4,9 +4,14 @@ on:
   release:
     types: [published]
 
+permissions:
+  contents: read
+  id-token: write
+
 jobs:
   publish:
     runs-on: ubuntu-latest
+    environment: npm-publish
     steps:
       - uses: actions/checkout@v4
 
@@ -20,12 +25,11 @@ jobs:
 
       - run: bun test ./test/unit
 
-      - name: Set up npm auth
-        run: |
-          echo "registry=https://registry.npmjs.org/" > ~/.npmrc
-          echo "//registry.npmjs.org/:_authToken=${NPM_CONFIG_TOKEN}" >> ~/.npmrc
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
 
-      - name: Publish to npm
-        run: bun publish --access public
-        env:
-          NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - run: npm --version
+
+      - run: npm publish --access public --provenance --loglevel verbose
