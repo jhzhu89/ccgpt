@@ -1,8 +1,14 @@
 #!/usr/bin/env bun
-import { createApp } from "./server.js";
-import { createClient } from "./openai/client.js";
-import { config } from "./config/index.js";
-import { logger } from "./logger.js";
+import { config as loadEnv } from "dotenv";
+import { homedir } from "node:os";
+import { join } from "node:path";
+
+loadEnv({ path: join(homedir(), ".m2rrc") });
+
+const { createApp } = await import("./server.js");
+const { createClient } = await import("./openai/client.js");
+const { config } = await import("./config/index.js");
+const { logger } = await import("./logger.js");
 
 const app = createApp(createClient());
 
