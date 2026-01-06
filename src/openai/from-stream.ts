@@ -55,9 +55,6 @@ export function* fromStreamEvent(
       message: event.response.error?.message ?? "Unknown error",
     };
   } else if (isIncompleteEvent(event)) {
-    const hasToolCall = event.response.output.some(
-      (item) => item.type === "function_call",
-    );
     yield {
       type: "done",
       stopReason: "max_tokens" as const,

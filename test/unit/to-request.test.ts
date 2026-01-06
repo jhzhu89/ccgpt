@@ -1,15 +1,18 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, mock, beforeEach } from "bun:test";
 
-vi.mock("../src/config/index.js", () => ({
+void mock.module("../../src/config/index.js", () => ({
   resolveModel: (m: string): string => m,
 }));
 
-vi.mock("../src/logger.js", () => ({
-  logger: { info: vi.fn(), warn: vi.fn() },
-}));
+void mock.module(
+  "../../src/logger.js",
+  (): { logger: { info: () => void; warn: () => void } } => ({
+    logger: { info: (): void => {}, warn: (): void => {} },
+  }),
+);
 
-import { toResponsesRequest } from "../src/openai/to-request.js";
-import type * as IR from "../src/ir/types.js";
+import { toResponsesRequest } from "../../src/openai/to-request.js";
+import type * as IR from "../../src/ir/types.js";
 
 function baseRequest(overrides: Partial<IR.Request> = {}): IR.Request {
   return {
@@ -21,9 +24,7 @@ function baseRequest(overrides: Partial<IR.Request> = {}): IR.Request {
 }
 
 describe("toResponsesRequest", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
+  beforeEach(() => {});
 
   it("passes max_tokens through", () => {
     const ir = baseRequest({ maxTokens: 100000 });

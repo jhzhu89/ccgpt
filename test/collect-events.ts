@@ -1,9 +1,8 @@
 /**
  * Collects all SSE events from a streaming request for debugging.
- * Run with: npx tsx test/collect-events.ts
+ * Run with: bun test/collect-events.ts
  */
 
-import { serve, type ServerType } from "@hono/node-server";
 import { app } from "../src/server.js";
 import { writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
@@ -18,12 +17,8 @@ interface CollectedEvent {
 }
 
 async function collectEvents(): Promise<void> {
-  const server: ServerType = serve({ fetch: app.fetch, port: 0 });
-  await new Promise<void>((resolve) => server.on("listening", resolve));
-
-  const addr = server.address();
-  const port = typeof addr === "object" && addr ? addr.port : 8000;
-  const baseURL = `http://localhost:${String(port)}`;
+  const server = Bun.serve({ fetch: app.fetch, port: 0 });
+  const baseURL = `http://localhost:${String(server.port)}`;
 
   console.log(`Server started on ${baseURL}`);
 
@@ -120,7 +115,7 @@ async function collectEvents(): Promise<void> {
       `\nCollected ${String(events.length)} events, saved to ${outputPath}`,
     );
   } finally {
-    server.close();
+    await server.stop();
   }
 }
 
@@ -154,4 +149,4 @@ function summarize(data: unknown): string {
   return String(type);
 }
 
-collectEvents().catch(console.error);
+void collectEvents().catch(console.error);

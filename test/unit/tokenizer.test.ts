@@ -1,6 +1,9 @@
-import { describe, it, expect } from "vitest";
-import { countMessageTokens, countToolTokens } from "../src/tokenizer/index.js";
-import type * as IR from "../src/ir/types.js";
+import { describe, it, expect } from "bun:test";
+import {
+  countMessageTokens,
+  countToolTokens,
+} from "../../src/tokenizer/index.js";
+import type * as IR from "../../src/ir/types.js";
 
 describe("countMessageTokens", () => {
   it("counts simple text message", () => {

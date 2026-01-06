@@ -1,5 +1,3 @@
-import "dotenv/config";
-
 function parseModelMap(env: string | undefined): Record<string, string> {
   if (!env) return {};
   const parsed: unknown = JSON.parse(env);

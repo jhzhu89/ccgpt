@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
-import type { ValidatedRequest } from "../src/anthropic/validate.js";
-import { fromRequest } from "../src/anthropic/from-request.js";
+import { describe, it, expect } from "bun:test";
+import type { ValidatedRequest } from "../../src/anthropic/validate.js";
+import { fromRequest } from "../../src/anthropic/from-request.js";
 
 describe("fromRequest", () => {
   it("parses basic text message", () => {
