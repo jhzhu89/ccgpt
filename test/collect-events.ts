@@ -3,7 +3,8 @@
  * Run with: bun test/collect-events.ts
  */
 
-import { app } from "../src/server.js";
+import { createApp } from "../src/server.js";
+import { createClient } from "../src/openai/client.js";
 import { writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,6 +18,7 @@ interface CollectedEvent {
 }
 
 async function collectEvents(): Promise<void> {
+  const app = createApp(createClient());
   const server = Bun.serve({ fetch: app.fetch, port: 0 });
   const baseURL = `http://localhost:${String(server.port)}`;
 

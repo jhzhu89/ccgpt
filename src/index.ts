@@ -1,7 +1,10 @@
 #!/usr/bin/env bun
-import { app } from "./server.js";
+import { createApp } from "./server.js";
+import { createClient } from "./openai/client.js";
 import { config } from "./config/index.js";
 import { logger } from "./logger.js";
+
+const app = createApp(createClient());
 
 const server = Bun.serve({
   fetch: app.fetch,

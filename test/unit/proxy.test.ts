@@ -1,10 +1,12 @@
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
-import { app } from "../../src/server.js";
+import { createApp } from "../../src/server.js";
+import type { OpenAIClient } from "../../src/openai/client.js";
 
 let server: ReturnType<typeof Bun.serve>;
 let baseURL: string;
 
 beforeAll(() => {
+  const app = createApp(null as unknown as OpenAIClient);
   server = Bun.serve({ fetch: app.fetch, port: 0 });
   baseURL = `http://localhost:${String(server.port)}`;
 });

@@ -1,12 +1,14 @@
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import Anthropic from "@anthropic-ai/sdk";
-import { app } from "../../src/server.js";
+import { createApp } from "../../src/server.js";
+import { createClient } from "../../src/openai/client.js";
 
 let server: ReturnType<typeof Bun.serve>;
 let client: Anthropic;
 let baseURL: string;
 
 beforeAll(() => {
+  const app = createApp(createClient());
   server = Bun.serve({ fetch: app.fetch, port: 0 });
   baseURL = `http://localhost:${String(server.port)}`;
   client = new Anthropic({ baseURL, apiKey: "dummy" });
@@ -47,7 +49,7 @@ describe("proxy integration", () => {
     expect(message.content.length).toBeGreaterThan(0);
     const textBlock = message.content.find((c) => c.type === "text");
     expect(textBlock).toBeDefined();
-  });
+  }, 30000);
 
   it("tool use", async () => {
     const message = await client.messages.create({
