@@ -12,7 +12,7 @@ import type { OpenAIClient } from "./openai/client.js";
 import { generateId } from "./ir/normalize.js";
 import { logger } from "./logger.js";
 import { countMessageTokens, countToolTokens } from "./tokenizer/index.js";
-import { resolveModel } from "./config/index.js";
+import { resolveModelConfig } from "./config/index.js";
 
 export function createApp(client: OpenAIClient): Hono {
   const app = new Hono();
@@ -61,14 +61,14 @@ export function createApp(client: OpenAIClient): Hono {
 
     const ir = fromRequest(validation.data);
     const reqId = generateId("req");
-    const resolvedModel = resolveModel(ir.model);
+    const resolved = resolveModelConfig(ir.model);
     c.header("x-request-id", reqId);
 
     logger.info(
       {
         reqId,
         model: ir.model,
-        resolvedModel,
+        resolvedModel: resolved.model,
         stream: ir.stream,
         maxTokens: ir.maxTokens,
         tools: ir.tools?.length ?? 0,
@@ -78,7 +78,7 @@ export function createApp(client: OpenAIClient): Hono {
     );
 
     if (!ir.stream) {
-      const openaiReq = toResponsesRequest(ir);
+      const openaiReq = toResponsesRequest(ir, resolved);
       try {
         const openaiRes = await client.responses.create(openaiReq);
         const irRes = fromResponse(openaiRes);
@@ -95,7 +95,7 @@ export function createApp(client: OpenAIClient): Hono {
         );
         return c.json(anthropicRes);
       } catch (error) {
-        return handleError(c, error, { reqId, model: resolvedModel });
+        return handleError(error, { reqId, model: resolved.model });
       }
     }
 
@@ -104,7 +104,7 @@ export function createApp(client: OpenAIClient): Hono {
     c.header("Connection", "keep-alive");
 
     return stream(c, async (s) => {
-      const openaiReq = toResponsesRequest(ir);
+      const openaiReq = toResponsesRequest(ir, resolved);
       try {
         const openaiStream = await client.responses.create({
           ...openaiReq,
@@ -123,7 +123,10 @@ export function createApp(client: OpenAIClient): Hono {
 
         logger.info({ reqId }, "streaming response complete");
       } catch (error) {
-        for (const sse of streamError(error, { reqId, model: resolvedModel })) {
+        for (const sse of streamError(error, {
+          reqId,
+          model: resolved.model,
+        })) {
           await s.write(sse);
         }
       }

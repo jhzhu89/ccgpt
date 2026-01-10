@@ -14,8 +14,8 @@ beforeAll(() => {
   client = new Anthropic({ baseURL, apiKey: "dummy" });
 });
 
-afterAll(() => {
-  void server.stop();
+afterAll(async () => {
+  await server.stop();
 });
 
 describe("proxy integration", () => {

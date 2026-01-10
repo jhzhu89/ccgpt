@@ -4,7 +4,7 @@ import type {
   ResponseOutputItem,
   ResponseOutputText,
 } from "openai/resources/responses/responses.js";
-import { mapStopReason } from "../ir/normalize.js";
+import { mapOpenAIStopReason } from "./stop-reason.js";
 
 function isOutputText(c: { type: string }): c is ResponseOutputText {
   return c.type === "output_text";
@@ -36,7 +36,7 @@ export function fromResponse(response: Response): IR.Response {
 
   return {
     content,
-    stopReason: mapStopReason(response.status, hasToolCall),
+    stopReason: mapOpenAIStopReason(response.status, hasToolCall),
     usage: {
       inputTokens: response.usage?.input_tokens ?? 0,
       outputTokens: response.usage?.output_tokens ?? 0,

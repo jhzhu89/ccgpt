@@ -1,6 +1,6 @@
 {
   "name": "@jhzhu89/m2r",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Anthropic Messages API to Azure OpenAI Responses API proxy",
   "type": "module",
   "license": "MIT",
@@ -36,7 +36,6 @@
     "test:watch": "bun test --watch ./test/unit"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.71.2",
     "@azure/identity": "^4.13.0",
     "dotenv": "^17.2.3",
     "gpt-tokenizer": "^3.4.0",
@@ -46,6 +45,7 @@
     "zod": "^4.3.4"
   },
   "devDependencies": {
+    "@anthropic-ai/sdk": "^0.71.2",
     "@eslint/js": "^9.39.2",
     "@types/bun": "latest",
     "eslint": "^9.39.2",

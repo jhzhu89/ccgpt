@@ -1,10 +1,10 @@
+import { config } from "../config/index.js";
+import type { ModelConfig } from "../config/model-config.js";
 import type * as IR from "../ir/types.js";
-import { resolveModel } from "../config/index.js";
-import { getModelConfig } from "../config/model-config.js";
 import type {
   ResponseCreateParamsNonStreaming,
-  ResponseInputItem,
   ResponseInputContent,
+  ResponseInputItem,
   ToolChoiceFunction,
 } from "openai/resources/responses/responses.js";
 
@@ -16,9 +16,11 @@ function mapToolChoice(
   return { type: "function", name: tc.name };
 }
 
-export function toResponsesRequest(
-  ir: IR.Request,
-): ResponseCreateParamsNonStreaming {
+function buildInput(ir: IR.Request): {
+  input: ResponseInputItem[];
+  tools?: ResponseCreateParamsNonStreaming["tools"];
+  toolChoice?: "required" | ToolChoiceFunction;
+} {
   const input: ResponseInputItem[] = [];
 
   for (const msg of ir.messages) {
@@ -29,14 +31,21 @@ export function toResponsesRequest(
           .map((c) => (c.type === "text" ? c.text : ""))
           .join(""),
       });
-    } else if (msg.role === "user") {
+      continue;
+    }
+
+    if (msg.role === "user") {
       const parts: ResponseInputContent[] = [];
       for (const c of msg.content) {
         if (c.type === "text") {
           parts.push({ type: "input_text", text: c.text });
-        } else if (c.type === "image") {
+          continue;
+        }
+        if (c.type === "image") {
           parts.push({ type: "input_image", image_url: c.url, detail: "auto" });
-        } else if (c.type === "tool_result") {
+          continue;
+        }
+        if (c.type === "tool_result") {
           input.push({
             type: "function_call_output",
             call_id: c.id,
@@ -47,22 +56,25 @@ export function toResponsesRequest(
       if (parts.length > 0) {
         input.push({ type: "message", role: "user", content: parts });
       }
-    } else {
-      for (const c of msg.content) {
-        if (c.type === "text") {
-          input.push({
-            type: "message",
-            role: "assistant",
-            content: c.text,
-          });
-        } else if (c.type === "tool_call") {
-          input.push({
-            type: "function_call",
-            call_id: c.id,
-            name: c.name,
-            arguments: JSON.stringify(c.arguments),
-          });
-        }
+      continue;
+    }
+
+    for (const c of msg.content) {
+      if (c.type === "text") {
+        input.push({
+          type: "message",
+          role: "assistant",
+          content: c.text,
+        });
+        continue;
+      }
+      if (c.type === "tool_call") {
+        input.push({
+          type: "function_call",
+          call_id: c.id,
+          name: c.name,
+          arguments: JSON.stringify(c.arguments),
+        });
       }
     }
   }
@@ -75,8 +87,17 @@ export function toResponsesRequest(
     strict: null,
   }));
 
-  const model = resolveModel(ir.model);
-  const modelConfig = getModelConfig(model);
+  const toolChoice = mapToolChoice(ir.toolChoice);
+
+  return { input, tools, toolChoice };
+}
+
+export function buildOpenAIRequest(
+  ir: IR.Request,
+  model: string,
+  modelConfig: ModelConfig,
+): ResponseCreateParamsNonStreaming {
+  const { input, tools, toolChoice } = buildInput(ir);
 
   const reasoning = modelConfig.supportsReasoningSummaries
     ? {
@@ -85,8 +106,6 @@ export function toResponsesRequest(
         summary: "auto" as const,
       }
     : undefined;
-
-  const toolChoice = mapToolChoice(ir.toolChoice);
 
   return {
     model,
@@ -101,4 +120,12 @@ export function toResponsesRequest(
     ...(ir.temperature !== undefined && { temperature: ir.temperature }),
     ...(ir.topP !== undefined && { top_p: ir.topP }),
   };
+}
+
+export function toResponsesRequest(
+  ir: IR.Request,
+  resolved?: { model: string; config: ModelConfig },
+): ResponseCreateParamsNonStreaming {
+  const resolution = resolved ?? config.resolveModelConfig(ir.model);
+  return buildOpenAIRequest(ir, resolution.model, resolution.config);
 }

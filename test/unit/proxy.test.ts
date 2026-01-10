@@ -11,8 +11,8 @@ beforeAll(() => {
   baseURL = `http://localhost:${String(server.port)}`;
 });
 
-afterAll(() => {
-  void server.stop();
+afterAll(async () => {
+  await server.stop();
 });
 
 describe("proxy", () => {

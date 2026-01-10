@@ -1,3 +1,9 @@
+import {
+  resolveModel as routingResolveModel,
+  resolveModelConfig as routingResolveModelConfig,
+} from "./routing.js";
+import type { ModelConfig } from "./model-config.js";
+
 function parseModelMap(env: string | undefined): Record<string, string> {
   if (!env) return {};
   const parsed: unknown = JSON.parse(env);
@@ -11,7 +17,7 @@ function parseModelMap(env: string | undefined): Record<string, string> {
   return result;
 }
 
-export const config = {
+const configSnapshot = {
   port: parseInt(process.env.PROXY_PORT || "8000"),
   azure: {
     endpoint: process.env.AZURE_OPENAI_ENDPOINT || "",
@@ -25,17 +31,13 @@ export const config = {
   },
 };
 
-export function resolveModel(alias: string): string {
-  if (config.modelMap[alias]) {
-    return config.modelMap[alias];
-  }
+export const config = {
+  ...configSnapshot,
+  resolveModel: (alias: string): string =>
+    routingResolveModel(configSnapshot, alias),
+  resolveModelConfig: (model: string): { model: string; config: ModelConfig } =>
+    routingResolveModelConfig(configSnapshot, model),
+};
 
-  const lower = alias.toLowerCase();
-  for (const [tier, model] of Object.entries(config.tiers)) {
-    if (lower.includes(tier)) {
-      return model;
-    }
-  }
-
-  return alias;
-}
+export const resolveModel = config.resolveModel;
+export const resolveModelConfig = config.resolveModelConfig;

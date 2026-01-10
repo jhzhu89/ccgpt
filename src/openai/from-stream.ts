@@ -16,7 +16,7 @@ import {
   isFailedEvent,
   isIncompleteEvent,
 } from "./types.js";
-import { mapStopReason } from "../ir/normalize.js";
+import { mapOpenAIStopReason } from "./stop-reason.js";
 
 function isFunctionCallItem(
   event: ResponseOutputItemAddedEvent,
@@ -69,7 +69,7 @@ export function* fromStreamEvent(
     );
     yield {
       type: "done",
-      stopReason: mapStopReason(event.response.status, hasToolCall),
+      stopReason: mapOpenAIStopReason(event.response.status, hasToolCall),
       usage: {
         inputTokens: event.response.usage?.input_tokens ?? 0,
         outputTokens: event.response.usage?.output_tokens ?? 0,

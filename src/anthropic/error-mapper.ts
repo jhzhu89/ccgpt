@@ -1,5 +1,4 @@
 import { APIError } from "openai";
-import type { Context } from "hono";
 import { logger } from "../logger.js";
 import { sseEvent } from "./sse.js";
 
@@ -65,10 +64,12 @@ function extractUpstreamRequestId(error: unknown): string | null {
 }
 
 export function handleError(
-  c: Context,
-  error: unknown,
-  ctx: ErrorContext,
+  errorOrUnused: unknown,
+  maybeError?: unknown,
+  ctx?: ErrorContext,
 ): Response {
+  const error = maybeError ?? errorOrUnused;
+  const context = ctx ?? { reqId: "unknown" };
   const status = extractStatus(error);
   const message = extractMessage(error);
   const errorType = mapStatusToErrorType(status);
@@ -76,8 +77,8 @@ export function handleError(
 
   logger.error(
     {
-      reqId: ctx.reqId,
-      model: ctx.model,
+      reqId: context.reqId,
+      model: context.model,
       status,
       errorType,
       message,

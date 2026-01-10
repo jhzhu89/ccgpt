@@ -1,11 +1,54 @@
-import type {
-  TextBlockParam,
-  ImageBlockParam,
-} from "@anthropic-ai/sdk/resources/messages";
 import type { ValidatedRequest } from "./validate.js";
 import type * as IR from "../ir/types.js";
 
-function isTextBlock(b: { type: string }): b is TextBlockParam {
+type TextBlock = { type: "text"; text: string };
+type ImageSource =
+  | { type: "base64"; media_type: string; data: string }
+  | { type: "url"; url: string };
+
+type ImageBlock = {
+  type: "image";
+  source: ImageSource;
+};
+
+type ToolUseBlock = {
+  type: "tool_use";
+  id: string;
+  name: string;
+  input: unknown;
+};
+
+type ToolResultBlock = {
+  type: "tool_result";
+  tool_use_id: string;
+  content: unknown;
+};
+
+type ThinkingBlock = {
+  type: "thinking";
+  thinking: string;
+};
+
+type ContentBlock =
+  | TextBlock
+  | ImageBlock
+  | ToolUseBlock
+  | ToolResultBlock
+  | ThinkingBlock;
+
+type MessageBlock = {
+  role: "user" | "assistant";
+  content: string | ContentBlock[];
+};
+
+type SystemBlock = string | TextBlock[];
+
+type RequestBody = Omit<ValidatedRequest, "messages" | "system"> & {
+  messages: MessageBlock[];
+  system?: SystemBlock;
+};
+
+function isTextBlock(b: { type: string }): b is TextBlock {
   return b.type === "text";
 }
 
@@ -31,7 +74,7 @@ function parseThinking(t: unknown): IR.ThinkingConfig | undefined {
   return undefined;
 }
 
-function parseImageBlock(block: ImageBlockParam): IR.ImageContent {
+function parseImageBlock(block: ImageBlock): IR.ImageContent {
   if (block.source.type === "base64") {
     return {
       type: "image",
@@ -42,7 +85,7 @@ function parseImageBlock(block: ImageBlockParam): IR.ImageContent {
   return { type: "image", url: block.source.url };
 }
 
-export function fromRequest(body: ValidatedRequest): IR.Request {
+export function fromRequest(body: RequestBody): IR.Request {
   const messages: IR.Message[] = [];
 
   if (body.system) {
@@ -68,16 +111,22 @@ export function fromRequest(body: ValidatedRequest): IR.Request {
     for (const block of blocks) {
       if (block.type === "text") {
         content.push({ type: "text", text: block.text });
-      } else if (block.type === "image") {
+        continue;
+      }
+      if (block.type === "image") {
         content.push(parseImageBlock(block));
-      } else if (block.type === "tool_use") {
+        continue;
+      }
+      if (block.type === "tool_use") {
         content.push({
           type: "tool_call",
           id: block.id,
           name: block.name,
           arguments: block.input,
         });
-      } else if (block.type === "tool_result") {
+        continue;
+      }
+      if (block.type === "tool_result") {
         content.push({
           type: "tool_result",
           id: block.tool_use_id,
