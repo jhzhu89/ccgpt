@@ -16,5 +16,6 @@ export function createClient(): OpenAIClient {
     azureADTokenProvider,
     endpoint: config.azure.endpoint,
     apiVersion: config.azure.apiVersion,
+    timeout: 300_000, // 5 minutes for long reasoning requests
   });
 }

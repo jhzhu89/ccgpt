@@ -15,6 +15,7 @@ const app = createApp(createClient());
 const server = Bun.serve({
   fetch: app.fetch,
   port: config.port,
+  idleTimeout: 255, // max allowed by Bun
 });
 
 logger.info({ port: server.port }, "proxy server started");
