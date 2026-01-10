@@ -64,6 +64,36 @@ claude() {
     CLAUDE_CODE_MAX_OUTPUT_TOKENS="64000" \
     command claude "$@"
 }
+
+m2r-log() {
+    local log="$HOME/.local/log/m2r.log"
+    local follow=false tail=50
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -f|--follow) follow=true; shift ;;
+            -n|--tail) tail="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+    [[ ! -f "$log" ]] && echo "Log not found: $log" && return 1
+    $follow && tail -n "$tail" -f "$log" || tail -n "$tail" "$log"
+}
+
+m2r-restart() {
+    local proxy_port=8001 m2rrc="$HOME/.m2rrc"
+    if [[ -f "$m2rrc" ]]; then
+        local port_line=$(grep '^PROXY_PORT=' "$m2rrc")
+        [[ -n "$port_line" ]] && proxy_port="${port_line#PROXY_PORT=}"
+    fi
+    pkill -f "node.*m2r" 2>/dev/null && echo "Stopped m2r" || echo "m2r not running"
+    mkdir -p "$HOME/.local/log"
+    nohup m2r >> "$HOME/.local/log/m2r.log" 2>&1 &
+    for i in {1..10}; do
+        sleep 0.3
+        nc -z localhost "$proxy_port" 2>/dev/null && echo "m2r started on port $proxy_port" && return 0
+    done
+    echo "Failed to start m2r"; return 1
+}
 ```
 
 ### PowerShell
@@ -71,46 +101,50 @@ claude() {
 Add to your `$PROFILE`:
 
 ```powershell
-function claude {
-    $proxyPort = 8001
+function Get-M2rPort {
     $m2rrc = "$HOME\.m2rrc"
-
     if (Test-Path $m2rrc) {
-        switch -Regex -File $m2rrc {
-            '^PROXY_PORT=(\d+)' { $proxyPort = [int]$Matches[1] }
-        }
+        switch -Regex -File $m2rrc { '^PROXY_PORT=(\d+)' { return [int]$Matches[1] } }
     }
+    return 8001
+}
 
-    $running = $false
-    try {
-        $tcp = [System.Net.Sockets.TcpClient]::new("localhost", $proxyPort)
-        $tcp.Dispose()
-        $running = $true
-    } catch {}
+function Test-M2rRunning($port) {
+    try { $tcp = [System.Net.Sockets.TcpClient]::new("localhost", $port); $tcp.Dispose(); return $true } catch { return $false }
+}
 
-    if (-not $running) {
-        Write-Host "Starting m2r on port $proxyPort..." -ForegroundColor Cyan
-        $logDir = "$HOME\.local\log"
-        New-Item -ItemType Directory -Path $logDir -Force -ErrorAction SilentlyContinue | Out-Null
-        Start-Process cmd -ArgumentList "/c m2r >> `"$logDir\m2r.log`" 2>&1" -WindowStyle Hidden
-
-        for ($i = 0; $i -lt 20; $i++) {
-            Start-Sleep -Milliseconds 250
-            try {
-                $tcp = [System.Net.Sockets.TcpClient]::new("localhost", $proxyPort)
-                $tcp.Dispose()
-                break
-            } catch {}
-        }
+function Start-M2r($port) {
+    $logDir = "$HOME\.local\log"
+    New-Item -ItemType Directory -Path $logDir -Force -ErrorAction SilentlyContinue | Out-Null
+    Start-Process powershell -ArgumentList "-WindowStyle Hidden -Command `"m2r *>> '$logDir\m2r.log'`"" -WindowStyle Hidden
+    for ($i = 0; $i -lt 20; $i++) {
+        Start-Sleep -Milliseconds 250
+        if (Test-M2rRunning $port) { return $true }
     }
+    return $false
+}
 
-    $exe = (Get-Command claude -CommandType Application -ErrorAction Stop)[0].Source
-
-    $env:ANTHROPIC_BASE_URL = "http://localhost:$proxyPort"
+function claude {
+    $port = Get-M2rPort
+    if (-not (Test-M2rRunning $port)) {
+        Write-Host "Starting m2r on port $port..." -ForegroundColor Cyan
+        if (-not (Start-M2r $port)) { Write-Host "Failed to start m2r" -ForegroundColor Red; return }
+    }
+    $env:ANTHROPIC_BASE_URL = "http://localhost:$port"
     $env:ANTHROPIC_API_KEY = "x"
     $env:CLAUDE_CODE_MAX_OUTPUT_TOKENS = "64000"
+    & (Get-Command claude -CommandType Application)[0].Source @args
+}
 
-    & $exe @args
+function m2r-restart {
+    $port = Get-M2rPort
+    $stopped = $false
+    Get-CimInstance Win32_Process -Filter "Name='bun.exe'" | Where-Object { $_.CommandLine -match 'm2r' } | ForEach-Object {
+        Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+        $stopped = $true
+    }
+    Write-Host $(if ($stopped) { "Stopped m2r" } else { "m2r not running" })
+    if (Start-M2r $port) { Write-Host "m2r started on port $port" } else { Write-Host "Failed to start m2r" -ForegroundColor Red }
 }
 
 function m2r-log {

@@ -1,15 +1,4 @@
-import { describe, it, expect, mock, beforeEach } from "bun:test";
-
-void mock.module("../../src/config/index.js", () => ({
-  resolveModel: (m: string): string => m,
-}));
-
-void mock.module(
-  "../../src/logger.js",
-  (): { logger: { info: () => void; warn: () => void } } => ({
-    logger: { info: (): void => {}, warn: (): void => {} },
-  }),
-);
+import { describe, it, expect, beforeEach } from "bun:test";
 
 import { toResponsesRequest } from "../../src/openai/to-request.js";
 import type * as IR from "../../src/ir/types.js";
