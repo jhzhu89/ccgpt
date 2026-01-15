@@ -1,5 +1,4 @@
-import { config } from "../config/index.js";
-import type { ModelConfig } from "../config/model-config.js";
+import { resolveModelConfig, type ModelConfig } from "../config/index.js";
 import type * as IR from "../ir/types.js";
 import type {
   ResponseCreateParamsNonStreaming,
@@ -126,6 +125,6 @@ export function toResponsesRequest(
   ir: IR.Request,
   resolved?: { model: string; config: ModelConfig },
 ): ResponseCreateParamsNonStreaming {
-  const resolution = resolved ?? config.resolveModelConfig(ir.model);
+  const resolution = resolved ?? resolveModelConfig(ir.model);
   return buildOpenAIRequest(ir, resolution.model, resolution.config);
 }

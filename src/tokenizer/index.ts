@@ -1,14 +1,14 @@
 import { encode } from "gpt-tokenizer";
 import type * as IR from "../ir/types.js";
 
-const TOKENS_PER_MESSAGE = 3;
-const BASE_TOKENS = 3;
+const tokensPerMessage = 3;
+const baseTokens = 3;
 
 export function countMessageTokens(messages: IR.Message[]): number {
-  let total = BASE_TOKENS;
+  let total = baseTokens;
 
   for (const msg of messages) {
-    total += TOKENS_PER_MESSAGE;
+    total += tokensPerMessage;
     total += encode(msg.role).length;
 
     for (const c of msg.content) {

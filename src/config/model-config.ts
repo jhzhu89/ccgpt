@@ -7,7 +7,7 @@ export interface ModelConfig {
   contextWindow: number;
 }
 
-const MODEL_FAMILIES: ReadonlyArray<{ prefix: string; config: ModelConfig }> = [
+const modelFamilies: ReadonlyArray<{ prefix: string; config: ModelConfig }> = [
   {
     prefix: "gpt-5.2-codex",
     config: {
@@ -77,7 +77,7 @@ const MODEL_FAMILIES: ReadonlyArray<{ prefix: string; config: ModelConfig }> = [
   },
 ];
 
-const DEFAULT_CONFIG: ModelConfig = {
+const defaultConfig: ModelConfig = {
   supportsParallelToolCalls: false,
   supportsReasoningSummaries: false,
   contextWindow: 128_000,
@@ -85,10 +85,10 @@ const DEFAULT_CONFIG: ModelConfig = {
 
 export function getModelConfig(slug: string): ModelConfig {
   const lower = slug.toLowerCase();
-  for (const { prefix, config } of MODEL_FAMILIES) {
+  for (const { prefix, config } of modelFamilies) {
     if (lower.startsWith(prefix)) {
       return config;
     }
   }
-  return DEFAULT_CONFIG;
+  return defaultConfig;
 }
