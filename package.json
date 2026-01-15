@@ -33,7 +33,10 @@
     "test": "bun test ./test/unit",
     "test:integration": "bun test ./test/integration",
     "test:all": "bun test ./test",
-    "test:watch": "bun test --watch ./test/unit"
+    "test:watch": "bun test --watch ./test/unit",
+    "release:patch": "npm version patch && git push && git push --tags",
+    "release:minor": "npm version minor && git push && git push --tags",
+    "release:major": "npm version major && git push && git push --tags"
   },
   "dependencies": {
     "@azure/identity": "^4.13.0",
