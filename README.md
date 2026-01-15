@@ -1,7 +1,6 @@
 # m2r
 
-Anthropic Messages API to Azure OpenAI Responses API proxy.
-
+Anthropic Messages API → Azure OpenAI Responses API proxy.
 Enables Claude Code CLI and other Anthropic-compatible clients to use Azure OpenAI as the backend.
 
 ## Installation
@@ -12,15 +11,27 @@ npm install -g @jhzhu89/m2r
 
 ## Configuration
 
-Create `~/.m2rrc` with your Azure OpenAI credentials:
+Create `~/.m2rrc` with your Azure OpenAI settings (Entra ID only; API keys are not used):
 
 ```bash
+# Required
 AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com
-AZURE_OPENAI_API_KEY=your-api-key
-AZURE_OPENAI_DEPLOYMENT=your-deployment-name
-PROXY_PORT=8001
+
+# Optional
+AZURE_OPENAI_API_VERSION=2025-04-01-preview
+PROXY_PORT=8000
 LOG_LEVEL=info
+
+# Model routing (optional)
+MODEL_MAP={"claude-3-5-sonnet":"gpt-5.2"}
+TIER_HAIKU=gpt-5-mini
+TIER_SONNET=gpt-5.2
+TIER_OPUS=gpt-5.1-codex-max
 ```
+
+Auth uses `DefaultAzureCredential`, so ensure your environment is logged in (e.g., `az login`) or set the usual `AZURE_CLIENT_ID` / `AZURE_TENANT_ID` / `AZURE_CLIENT_SECRET`.
+
+Routing: `MODEL_MAP` overrides exact model aliases; otherwise `haiku`/`sonnet`/`opus` substrings map to the configured tier models.
 
 ## Usage
 
@@ -30,7 +41,7 @@ Start the proxy server:
 m2r
 ```
 
-Then point your Anthropic client to `http://localhost:8001`.
+Then point your Anthropic client to `http://localhost:8000`.
 
 ## Shell Integration
 
@@ -42,7 +53,7 @@ Add to `~/.zshrc` or `~/.bashrc`:
 
 ```bash
 claude() {
-    local proxy_port=8001
+    local proxy_port=8000
     local m2rrc="$HOME/.m2rrc"
 
     if [[ -f "$m2rrc" ]]; then
@@ -80,7 +91,7 @@ m2r-log() {
 }
 
 m2r-restart() {
-    local proxy_port=8001 m2rrc="$HOME/.m2rrc"
+    local proxy_port=8000 m2rrc="$HOME/.m2rrc"
     if [[ -f "$m2rrc" ]]; then
         local port_line=$(grep '^PROXY_PORT=' "$m2rrc")
         [[ -n "$port_line" ]] && proxy_port="${port_line#PROXY_PORT=}"
@@ -106,7 +117,7 @@ function Get-M2rPort {
     if (Test-Path $m2rrc) {
         switch -Regex -File $m2rrc { '^PROXY_PORT=(\d+)' { return [int]$Matches[1] } }
     }
-    return 8001
+    return 8000
 }
 
 function Test-M2rRunning($port) {
