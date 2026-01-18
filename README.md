@@ -43,11 +43,34 @@ m2r
 
 Then point your Anthropic client to `http://localhost:8000`.
 
-## Shell Integration
+## Linux (systemd user service)
 
-These shell functions automatically start `m2r` when you run `claude` and configure the necessary environment variables.
+Install and start:
 
-### Zsh / Bash
+```bash
+./scripts/m2r-service.sh install
+```
+
+Status and logs:
+
+```bash
+systemctl --user status m2r.service
+journalctl --user -u m2r.service -f
+```
+
+Enable start on boot without login:
+
+```bash
+loginctl enable-linger $USER
+```
+
+Uninstall:
+
+```bash
+./scripts/m2r-service.sh uninstall
+```
+
+### Zsh / Bash (optional helpers)
 
 Add to `~/.zshrc` or `~/.bashrc`:
 
@@ -76,34 +99,39 @@ claude() {
     command claude "$@"
 }
 
-m2r-log() {
-    local log="$HOME/.local/log/m2r.log"
-    local follow=false tail=50
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            -f|--follow) follow=true; shift ;;
-            -n|--tail) tail="$2"; shift 2 ;;
-            *) shift ;;
-        esac
-    done
-    [[ ! -f "$log" ]] && echo "Log not found: $log" && return 1
-    $follow && tail -n "$tail" -f "$log" || tail -n "$tail" "$log"
-}
+m2r-config() {
+    local m2rrc="$HOME/.m2rrc"
+    local action="$1"
+    local key="$2"
+    local value="$3"
 
-m2r-restart() {
-    local proxy_port=8000 m2rrc="$HOME/.m2rrc"
-    if [[ -f "$m2rrc" ]]; then
-        local port_line=$(grep '^PROXY_PORT=' "$m2rrc")
-        [[ -n "$port_line" ]] && proxy_port="${port_line#PROXY_PORT=}"
-    fi
-    pkill -f "node.*m2r" 2>/dev/null && echo "Stopped m2r" || echo "m2r not running"
-    mkdir -p "$HOME/.local/log"
-    nohup m2r >> "$HOME/.local/log/m2r.log" 2>&1 &
-    for i in {1..10}; do
-        sleep 0.3
-        nc -z localhost "$proxy_port" 2>/dev/null && echo "m2r started on port $proxy_port" && return 0
-    done
-    echo "Failed to start m2r"; return 1
+    mkdir -p "$(dirname "$m2rrc")"
+
+    case "$action" in
+        get)
+            [[ -z "$key" ]] && echo "Usage: m2r-config get KEY" && return 1
+            [[ -f "$m2rrc" ]] && grep -E "^${key}=" "$m2rrc" | tail -n 1 | cut -d= -f2-
+            ;;
+        set)
+            [[ -z "$key" || -z "$value" ]] && echo "Usage: m2r-config set KEY VALUE" && return 1
+            if [[ -f "$m2rrc" ]] && grep -q "^${key}=" "$m2rrc"; then
+                if sed --version >/dev/null 2>&1; then
+                    sed -i "s|^${key}=.*|${key}=${value}|" "$m2rrc"
+                else
+                    sed -i '' "s|^${key}=.*|${key}=${value}|" "$m2rrc"
+                fi
+            else
+                echo "${key}=${value}" >> "$m2rrc"
+            fi
+            ;;
+        list|"")
+            [[ -f "$m2rrc" ]] && cat "$m2rrc" || true
+            ;;
+        *)
+            echo "Usage: m2r-config [list|get KEY|set KEY VALUE]"
+            return 1
+            ;;
+    esac
 }
 ```
 

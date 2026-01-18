@@ -10,6 +10,8 @@ const { createClient } = await import("./openai/client.js");
 const { config } = await import("./config/index.js");
 const { logger } = await import("./logger.js");
 
+logger.info({ config }, "server config");
+
 const app = createApp(createClient());
 
 const server = Bun.serve({
