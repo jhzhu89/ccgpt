@@ -81,7 +81,7 @@ describe("fromRequest", () => {
       thinking: { type: "enabled", budget_tokens: 5000 },
     };
     const ir = fromRequest(body);
-    expect(ir.thinking).toEqual({ type: "enabled", budgetTokens: 5000 });
+    expect(ir.thinking).toEqual({ type: "enabled", budgetTokens: 5000, effort: "medium" });
   });
 
   it("parses image block with base64", () => {
