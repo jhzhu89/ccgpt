@@ -60,10 +60,15 @@ const toolChoice = z.union([
   z.object({ type: z.literal("tool"), name: z.string() }),
 ]);
 
-const thinking = z.object({
-  type: z.literal("enabled"),
-  budget_tokens: z.number(),
-});
+const thinking = z.union([
+  z.object({
+    type: z.literal("enabled"),
+    budget_tokens: z.number(),
+  }),
+  z.object({
+    type: z.literal("disabled"),
+  }),
+]);
 
 const schema = z.object({
   model: z.string(),
