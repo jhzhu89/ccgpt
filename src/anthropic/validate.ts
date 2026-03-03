@@ -60,15 +60,10 @@ const toolChoice = z.union([
   z.object({ type: z.literal("tool"), name: z.string() }),
 ]);
 
-const thinking = z.union([
-  z.object({
-    type: z.literal("enabled"),
-    budget_tokens: z.number(),
-  }),
-  z.object({
-    type: z.literal("disabled"),
-  }),
-]);
+const thinking = z.object({
+  type: z.string(),
+  budget_tokens: z.number().optional(),
+});
 
 const schema = z.object({
   model: z.string(),
@@ -83,6 +78,9 @@ const schema = z.object({
   stop_sequences: z.array(z.string()).optional(),
   tool_choice: toolChoice.optional(),
   thinking: thinking.optional(),
+  output_config: z
+    .object({ effort: z.enum(["low", "medium", "high", "max"]).optional() })
+    .optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
 });
 

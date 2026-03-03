@@ -44,7 +44,7 @@ export function createApp(client: OpenAIClient): Hono {
   app.post("/v1/messages", async (c) => {
     const body: unknown = await c.req.json();
 
-    // logger.debug({ body }, "incoming request body");
+    logger.debug({ body }, "incoming request body");
 
     const validation = validate(body);
 

@@ -66,10 +66,30 @@ function parseToolChoice(tc: unknown): IR.ToolChoice | undefined {
   return undefined;
 }
 
-function parseThinking(t: unknown): IR.ThinkingConfig | undefined {
+function budgetToEffort(budget: number): "low" | "medium" | "high" {
+  if (budget <= 4_000) return "low";
+  if (budget <= 16_000) return "medium";
+  return "high";
+}
+
+function parseThinking(
+  t: unknown,
+  outputEffort?: "low" | "medium" | "high" | "max",
+): IR.ThinkingConfig | undefined {
+  // Normalize "max" → "high" (OpenAI doesn't support "max")
+  const effort = outputEffort === "max" ? "high" : outputEffort;
+
   if (!isRecord(t)) return undefined;
+
   if (t.type === "enabled" && typeof t.budget_tokens === "number") {
-    return { type: "enabled", budgetTokens: t.budget_tokens };
+    return {
+      type: "enabled",
+      budgetTokens: t.budget_tokens,
+      effort: effort ?? budgetToEffort(t.budget_tokens),
+    };
+  }
+  if (t.type === "adaptive") {
+    return { type: "enabled", budgetTokens: 0, effort };
   }
   return undefined;
 }
@@ -162,6 +182,6 @@ export function fromRequest(body: RequestBody): IR.Request {
     topP: body.top_p,
     stopSequences: body.stop_sequences,
     toolChoice: parseToolChoice(body.tool_choice),
-    thinking: parseThinking(body.thinking),
+    thinking: parseThinking(body.thinking, body.output_config?.effort),
   };
 }
