@@ -121,6 +121,10 @@ Live Copilot tests require `ccgpt auth`:
 bun run test:integration
 ```
 
+## History
+
+ccgpt continues [m2r](https://github.com/jhzhu89/ccgpt/commit/c50bc1c2119972f926734d88c90cf854e3afafd8), first committed on January 5, 2026 and first released as [v0.1.0](https://github.com/jhzhu89/ccgpt/tree/v0.1.0) the next day. The original commit history and v0.1.x tags are preserved intact; the ccgpt rebuild is a direct descendant rather than a squashed import.
+
 ## Endpoints
 
 - `POST /v1/messages`
