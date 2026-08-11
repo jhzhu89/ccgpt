@@ -2,50 +2,66 @@
 
 **Claude Code in front. GPT behind it.**
 
-[![Release](https://img.shields.io/github/v/release/jhzhu89/ccgpt)](https://github.com/jhzhu89/ccgpt/releases/latest)
 [![License](https://img.shields.io/github/license/jhzhu89/ccgpt)](LICENSE)
 
-Keep the normal `claude` workflow while ccgpt routes requests to GPT through GitHub Copilot or any OpenAI-compatible Responses API.
+ccgpt lets you keep the normal `claude` workflow while GPT handles the work through GitHub Copilot or an OpenAI-compatible Responses API.
 
-ccgpt translates the Anthropic Messages API expected by Claude Code directly to the Responses API. It does not use Chat Completions.
+It translates Claude Code's Anthropic Messages requests directly to Responses. Chat Completions is not used.
 
-- GitHub Copilot is the zero-config default backend.
-- Claude model tiers map automatically to the latest available GPT tier.
-- `claude --model` can select a tier or an exact backend model.
-- Tool calls, reasoning continuity, streaming, and parallel tool use are preserved.
+- GitHub Copilot is the default backend when no API key is configured.
+- Claude model families map automatically to the latest matching GPT tier.
+- `claude --model` accepts a Claude tier or an exact backend model.
+- Reasoning continuity, streaming, tools, images, and parallel tool calls are preserved.
+- The temporary gateway stays silent and uses a random loopback port.
 
-## Quick start
+## Install
 
-Requirements: [Bun](https://bun.sh), Git, and Claude Code CLI.
+Windows and Linux are supported. Requirements: Rust 1.88 or newer, Git, the Claude Code CLI, and PowerShell, Bash, or Zsh.
 
 ```bash
 git clone https://github.com/jhzhu89/ccgpt.git
 cd ccgpt
-bun run setup
+cargo install --path . --locked --force
+ccgpt setup
 ccgpt auth
+```
+
+Open a new shell after `ccgpt setup`, then run:
+
+```bash
 claude
 ```
 
-`bun run setup` installs dependencies, builds ccgpt, links the local `ccgpt` command, and connects the `claude` shell command to ccgpt. Open a new shell after setup. It does not replace the Claude Code executable.
+The setup command adds a small shell function so the daily command remains `claude`; it does not replace the Claude Code executable.
 
-To select an exact backend model when needed:
+`ccgpt auth` prints a GitHub URL and device code. Open the URL on any device, enter the code, and return to the terminal.
+
+After pulling an update, rebuild locally:
 
 ```bash
+cargo install --path . --locked --force
+```
+
+## Models
+
+At startup, the Copilot backend reads the available Responses models and selects the highest numeric version in each tier:
+
+| Claude request | GPT tier |
+| --- | --- |
+| Opus, Fable, Mythos, default, or unknown | Sol |
+| Sonnet | Terra |
+| Haiku | Luna |
+
+Omitting `--model` works normally. To override the backend model for one session:
+
+```bash
+claude --model sonnet
 claude --model gpt-5.6-sol
 ```
 
-Run setup again after pulling code changes.
+Copilot accepts an exact model only when its model catalog advertises that ID. API-key backends pass non-Claude model IDs through unchanged.
 
-## GitHub Copilot
-
-Copilot is the default backend. `ccgpt auth` authenticates with GitHub's device flow. The GitHub token is stored at `~/.local/share/ccgpt/github_token`, and short-lived Copilot tokens are refreshed automatically.
-
-At startup, ccgpt reads the available Copilot Responses models and routes Claude model families by tier:
-
-- Fable, Mythos, and Opus use the newest Sol model.
-- Sonnet uses the newest Terra model.
-- Haiku uses the newest Luna model.
-- Unknown Claude model families use the Sol tier.
+With Copilot, Claude Code's requested reasoning effort is matched to the closest effort advertised by the selected model. Extended-thinking budgets map to low, medium, or high. Parallel tool calls are enabled only when the model advertises support and Claude Code has not disabled them. API-key backends are expected to expose current GPT Responses capabilities and receive these settings directly.
 
 ## API-key backend
 
@@ -59,78 +75,52 @@ CCGPT_MODEL_BALANCED=gpt-5.6-terra
 CCGPT_MODEL_FAST=gpt-5.6-luna
 ```
 
-Only `CCGPT_API_KEY` is required. The base URL and model tiers shown above are the defaults. Generic OpenAI environment variables are intentionally ignored.
+Only `CCGPT_API_KEY` is required. The other values shown are defaults. Generic OpenAI environment variables are intentionally ignored, so an unrelated `OPENAI_API_KEY` cannot silently change the backend.
 
-## Select a model
+Remove `CCGPT_API_KEY` to return to GitHub Copilot. Run `ccgpt auth` once to authorize Copilot through GitHub's device flow. The GitHub token is stored at `~/.local/share/ccgpt/github_token`; short-lived Copilot tokens are refreshed automatically.
 
-Claude Code remains the daily entry point. Its `--model` option selects a backend tier or an exact backend model:
+## How it runs
 
-```bash
-claude --model opus
-claude --model sonnet
-claude --model haiku
-claude --model gpt-5.6-sol
-```
-
-Omit `--model` to use Claude Code's default model; ccgpt maps it to the matching backend tier automatically.
-
-With Copilot, exact model IDs must be advertised by the endpoint. With an API-key backend, non-Claude model IDs pass through unchanged.
-
-Parallel tool calls are enabled only when the request contains tools, the selected model supports them, `tool_choice` is not `none`, and Claude Code has not disabled parallel tool use.
-
-The shell integration starts the gateway on a free local port, configures Claude Code, forwards all arguments, and stops the gateway when Claude Code exits.
-
-## Privacy and security
-
-- The normal `claude` integration runs the gateway locally on `127.0.0.1` with a random free port.
-- Prompts and tool results go directly from your machine to the selected GitHub Copilot or API-key backend. ccgpt has no hosted relay or telemetry.
-- The GitHub token is stored locally with owner-only file permissions where the operating system supports them.
-- API keys stay in `~/.ccgptrc`; do not commit that file.
-
-## Run the gateway manually
-
-Run `ccgpt` to listen on port 8000. Set `CCGPT_PORT` in `~/.ccgptrc` to change it, then configure Claude Code to use that address.
-
-PowerShell:
-
-```powershell
-$env:ANTHROPIC_BASE_URL = "http://localhost:8000"
-$env:ANTHROPIC_AUTH_TOKEN = "ccgpt"
-claude
-```
-
-Bash or Zsh:
+The installed shell function turns:
 
 ```bash
-ANTHROPIC_BASE_URL=http://localhost:8000 \
-ANTHROPIC_AUTH_TOKEN=ccgpt \
-claude
+claude <arguments>
 ```
 
-## Verify locally
+into `ccgpt run <arguments>`. ccgpt binds a free `127.0.0.1` port, starts Claude Code with the two Anthropic endpoint variables, forwards its terminal and exit code, then shuts the gateway down.
 
-```bash
-bun run lint
-bun run test
-bun run build
-```
+Requests use `store: false`. Encrypted reasoning items are returned to Claude Code as opaque `ccgpt:` signatures and replayed on later turns, so reasoning context survives without server-side response state.
 
-Live Copilot tests require `ccgpt auth`:
-
-```bash
-bun run test:integration
-```
-
-## History
-
-ccgpt continues [m2r](https://github.com/jhzhu89/ccgpt/commit/c50bc1c2119972f926734d88c90cf854e3afafd8), first committed on January 5, 2026 and first released as [v0.1.0](https://github.com/jhzhu89/ccgpt/tree/v0.1.0) the next day. The original commit history and v0.1.x tags are preserved intact; the ccgpt rebuild is a direct descendant rather than a squashed import.
-
-## Endpoints
+The local endpoints are:
 
 - `POST /v1/messages`
 - `POST /v1/messages/count_tokens`
 - `GET /health`
 
+To run the gateway manually on port 8000, use `ccgpt`. It prints the bearer token required as `ANTHROPIC_AUTH_TOKEN`. Set `CCGPT_PORT` in `~/.ccgptrc` to choose another port.
+
+## Develop locally
+
+```bash
+cargo fmt --check
+cargo clippy --all-targets --locked -- -D warnings
+cargo test --all-targets --locked
+cargo build --release --locked
+```
+
+There is no npm package or publishing pipeline.
+
+## Privacy
+
+- The normal wrapper listens only on a random loopback port.
+- Prompts and tool results go directly to GitHub Copilot or the configured Responses endpoint.
+- ccgpt has no hosted relay, telemetry, or conversation store.
+- Secrets remain in local files and are never copied into the repository.
+
+## History
+
+ccgpt continues [m2r](https://github.com/jhzhu89/ccgpt/commit/c50bc1c2119972f926734d88c90cf854e3afafd8), first committed on January 5, 2026 and released as [v0.1.0](https://github.com/jhzhu89/ccgpt/tree/v0.1.0) the next day. The original commits and tags remain in this repository; ccgpt and this Rust rewrite are direct descendants, not squashed imports.
+
 ## License
 
-MIT
+[MIT](LICENSE)
