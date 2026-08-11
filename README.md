@@ -1,8 +1,18 @@
 # ccgpt
 
-Use GPT models from Claude Code through GitHub Copilot or an OpenAI-compatible Responses API.
+**Claude Code in front. GPT behind it.**
+
+[![Release](https://img.shields.io/github/v/release/jhzhu89/ccgpt)](https://github.com/jhzhu89/ccgpt/releases/latest)
+[![License](https://img.shields.io/github/license/jhzhu89/ccgpt)](LICENSE)
+
+Keep the normal `claude` workflow while ccgpt routes requests to GPT through GitHub Copilot or any OpenAI-compatible Responses API.
 
 ccgpt translates the Anthropic Messages API expected by Claude Code directly to the Responses API. It does not use Chat Completions.
+
+- GitHub Copilot is the zero-config default backend.
+- Claude model tiers map automatically to the latest available GPT tier.
+- `claude --model` can select a tier or an exact backend model.
+- Tool calls, reasoning continuity, streaming, and parallel tool use are preserved.
 
 ## Quick start
 
@@ -13,10 +23,16 @@ git clone https://github.com/jhzhu89/ccgpt.git
 cd ccgpt
 bun run setup
 ccgpt auth
-claude --model gpt-5.6-sol
+claude
 ```
 
 `bun run setup` installs dependencies, builds ccgpt, links the local `ccgpt` command, and connects the `claude` shell command to ccgpt. Open a new shell after setup. It does not replace the Claude Code executable.
+
+To select an exact backend model when needed:
+
+```bash
+claude --model gpt-5.6-sol
+```
 
 Run setup again after pulling code changes.
 
@@ -63,6 +79,13 @@ With Copilot, exact model IDs must be advertised by the endpoint. With an API-ke
 Parallel tool calls are enabled only when the request contains tools, the selected model supports them, `tool_choice` is not `none`, and Claude Code has not disabled parallel tool use.
 
 The shell integration starts the gateway on a free local port, configures Claude Code, forwards all arguments, and stops the gateway when Claude Code exits.
+
+## Privacy and security
+
+- The normal `claude` integration runs the gateway locally on `127.0.0.1` with a random free port.
+- Prompts and tool results go directly from your machine to the selected GitHub Copilot or API-key backend. ccgpt has no hosted relay or telemetry.
+- The GitHub token is stored locally with owner-only file permissions where the operating system supports them.
+- API keys stay in `~/.ccgptrc`; do not commit that file.
 
 ## Run the gateway manually
 
