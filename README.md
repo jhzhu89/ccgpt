@@ -42,39 +42,6 @@ After pulling an update, rebuild locally:
 cargo install --path . --locked --force
 ```
 
-## TypeScript fallback
-
-During the Rust transition, the final TypeScript release can be installed beside it. Rust owns `ccgpt` and the normal `claude` command; the frozen TypeScript fallback uses `ccgpt-ts` and `claude-ts`. Both versions share `~/.ccgptrc` and the same GitHub authentication.
-
-Do not run `bun link` or `bun run setup` in the TypeScript worktree because both claim the primary `ccgpt` and `claude` names.
-
-Windows PowerShell:
-
-```powershell
-git worktree add --detach ..\ccgpt-ts-v0.2.0 v0.2.0
-Push-Location ..\ccgpt-ts-v0.2.0
-bun install --frozen-lockfile
-bun build --compile src/index.ts --outfile "$HOME\.cargo\bin\ccgpt-ts.exe"
-Pop-Location
-```
-
-Linux Bash or Zsh:
-
-```bash
-git worktree add --detach ../ccgpt-ts-v0.2.0 v0.2.0
-cd ../ccgpt-ts-v0.2.0
-bun install --frozen-lockfile
-bun build --compile src/index.ts --outfile "$HOME/.cargo/bin/ccgpt-ts"
-cd -
-```
-
-If the TypeScript release was previously installed with `bun link`, run `bun unlink` from that checkout before reinstalling Rust so `ccgpt` resolves to the Cargo binary. Run `ccgpt setup` again, open a new shell, and use:
-
-```bash
-claude       # Rust
-claude-ts    # TypeScript fallback
-```
-
 ## Models
 
 At startup, the Copilot backend reads the available Responses models and selects the highest numeric version in each tier:

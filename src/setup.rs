@@ -19,7 +19,7 @@ fn install_powershell(data: &Path) -> Result<Vec<PathBuf>, String> {
     let integration = data.join("shell.ps1");
     fs::write(
         &integration,
-        "function global:claude {\n  & ccgpt run @args\n}\nfunction global:claude-ts {\n  & ccgpt-ts run @args\n}\n",
+        "function global:claude {\n  & ccgpt run @args\n}\n",
     )
     .map_err(io_error)?;
     let profiles = powershell_profiles()?;
@@ -58,7 +58,7 @@ fn install_posix(home: &Path, data: &Path) -> Result<Vec<PathBuf>, String> {
     let integration = data.join("shell.sh");
     fs::write(
         &integration,
-        "claude() {\n  command ccgpt run \"$@\"\n}\nclaude-ts() {\n  command ccgpt-ts run \"$@\"\n}\n",
+        "claude() {\n  command ccgpt run \"$@\"\n}\n",
     )
     .map_err(io_error)?;
     let shell = env::var("SHELL").unwrap_or_default();
