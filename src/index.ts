@@ -5,6 +5,11 @@ import { join } from "node:path";
 
 loadEnv({ path: join(homedir(), ".ccgptrc"), quiet: true });
 
+const launchClaude = process.argv[2] === "run";
+if (launchClaude && !process.env.LOG_LEVEL) {
+  process.env.LOG_LEVEL = "silent";
+}
+
 const { createApp } = await import("./server.js");
 const { createClient } = await import("./openai/client.js");
 const { config, createCopilotModelRouter, createDirectModelRouter } =
@@ -25,7 +30,6 @@ const modelRouter =
     : createDirectModelRouter(config.backend.targets);
 logger.info({ models: modelRouter.targets }, "model routing configured");
 const app = createApp(client, (requested) => modelRouter.resolve(requested));
-const launchClaude = process.argv[2] === "run";
 
 const server = Bun.serve({
   fetch: app.fetch,
