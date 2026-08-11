@@ -1,54 +1,47 @@
 {
-  "name": "@jhzhu89/m2r",
-  "version": "0.1.10",
-  "description": "Anthropic Messages API to Azure OpenAI Responses API proxy",
+  "name": "ccgpt",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Use GPT models from Claude Code through GitHub Copilot or an OpenAI-compatible Responses API",
   "type": "module",
   "license": "MIT",
   "author": "Jiahao Zhu <jiahzhu@outlook.com>",
   "repository": {
     "type": "git",
-    "url": "https://github.com/jhzhu89/m2r.git"
+    "url": "https://github.com/jhzhu89/ccgpt.git"
   },
   "keywords": [
     "anthropic",
     "openai",
-    "azure",
+    "github-copilot",
     "proxy",
     "claude",
     "gpt"
   ],
   "bin": {
-    "m2r": "./dist/index.js"
+    "ccgpt": "./dist/index.js"
   },
-  "files": [
-    "dist"
-  ],
   "scripts": {
+    "setup": "bun install && bun run build && bun link && bun scripts/setup.ts",
     "dev": "bun run --watch src/index.ts",
     "build": "bun build src/index.ts --outdir dist --target bun",
     "start": "bun dist/index.js",
-    "format": "prettier --write src test",
-    "lint": "eslint src test",
-    "lint:fix": "eslint src test --fix",
+    "format": "prettier --write src test scripts README.md package.json",
+    "lint": "eslint src test scripts",
     "test": "bun test ./test/unit",
     "test:integration": "bun test ./test/integration",
-    "test:all": "bun test ./test",
-    "test:watch": "bun test --watch ./test/unit",
-    "release:patch": "npm version patch && git push && git push --tags",
-    "release:minor": "npm version minor && git push && git push --tags",
-    "release:major": "npm version major && git push && git push --tags"
+    "check": "bun run lint && bun run test && bun run build"
   },
   "dependencies": {
-    "@azure/identity": "^4.13.0",
     "dotenv": "^17.2.3",
     "gpt-tokenizer": "^3.4.0",
     "hono": "^4.11.3",
-    "openai": "^6.15.0",
+    "openai": "^7.4.0",
     "pino": "^10.1.0",
     "zod": "^4.3.4"
   },
   "devDependencies": {
-    "@anthropic-ai/sdk": "^0.71.2",
+    "@anthropic-ai/sdk": "^0.115.0",
     "@eslint/js": "^9.39.2",
     "@types/bun": "latest",
     "eslint": "^9.39.2",

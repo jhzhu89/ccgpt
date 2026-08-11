@@ -1,5 +1,12 @@
 import type * as IR from "../ir/types.js";
 import { generateId } from "../ir/normalize.js";
+import { encodeReasoningItem } from "./reasoning.js";
+
+interface AnthropicThinkingBlock {
+  type: "thinking";
+  thinking: "";
+  signature: string;
+}
 
 interface AnthropicTextBlock {
   type: "text";
@@ -13,7 +20,10 @@ interface AnthropicToolUseBlock {
   input: unknown;
 }
 
-type AnthropicContentBlock = AnthropicTextBlock | AnthropicToolUseBlock;
+type AnthropicContentBlock =
+  | AnthropicThinkingBlock
+  | AnthropicTextBlock
+  | AnthropicToolUseBlock;
 
 interface AnthropicResponse {
   id: string;
@@ -26,6 +36,13 @@ interface AnthropicResponse {
 }
 
 function toContentBlock(c: IR.ResponseContent): AnthropicContentBlock {
+  if (c.type === "reasoning") {
+    return {
+      type: "thinking",
+      thinking: "",
+      signature: encodeReasoningItem(c.item),
+    };
+  }
   if (c.type === "text") {
     return { type: "text", text: c.text };
   }

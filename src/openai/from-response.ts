@@ -3,6 +3,7 @@ import type {
   Response,
   ResponseOutputItem,
   ResponseOutputText,
+  ResponseReasoningItem,
 } from "openai/resources/responses/responses.js";
 import { mapOpenAIStopReason } from "./stop-reason.js";
 
@@ -10,7 +11,16 @@ function isOutputText(c: { type: string }): c is ResponseOutputText {
   return c.type === "output_text";
 }
 
+function isReasoningItem(
+  item: ResponseOutputItem,
+): item is ResponseReasoningItem {
+  return item.type === "reasoning";
+}
+
 function parseOutputItem(item: ResponseOutputItem): IR.ResponseContent[] {
+  if (isReasoningItem(item) && typeof item.encrypted_content === "string") {
+    return [{ type: "reasoning", item }];
+  }
   if (item.type === "message") {
     return item.content.filter(isOutputText).map((c) => ({
       type: "text",

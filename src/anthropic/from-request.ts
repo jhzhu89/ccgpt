@@ -1,5 +1,6 @@
 import type { ValidatedRequest } from "./validate.js";
 import type * as IR from "../ir/types.js";
+import { decodeReasoningItem } from "./reasoning.js";
 
 type TextBlock = { type: "text"; text: string };
 type ImageSource =
@@ -22,11 +23,18 @@ type ToolResultBlock = {
   type: "tool_result";
   tool_use_id: string;
   content: unknown;
+  is_error?: boolean;
 };
 
 type ThinkingBlock = {
   type: "thinking";
   thinking: string;
+  signature: string;
+};
+
+type MidConversationSystemBlock = {
+  type: "mid_conv_system";
+  content: TextBlock[];
 };
 
 type ContentBlock =
@@ -34,10 +42,11 @@ type ContentBlock =
   | ImageBlock
   | ToolUseBlock
   | ToolResultBlock
-  | ThinkingBlock;
+  | ThinkingBlock
+  | MidConversationSystemBlock;
 
 type MessageBlock = {
-  role: "user" | "assistant";
+  role: IR.Role;
   content: string | ContentBlock[];
 };
 
@@ -58,38 +67,34 @@ function isRecord(val: unknown): val is Record<string, unknown> {
 
 function parseToolChoice(tc: unknown): IR.ToolChoice | undefined {
   if (!isRecord(tc)) return undefined;
-  if (tc.type === "auto") return { type: "auto" };
-  if (tc.type === "any") return { type: "any" };
+  const disableParallelToolUse =
+    typeof tc.disable_parallel_tool_use === "boolean"
+      ? tc.disable_parallel_tool_use
+      : undefined;
+  if (tc.type === "auto") return { type: "auto", disableParallelToolUse };
+  if (tc.type === "any") return { type: "any", disableParallelToolUse };
+  if (tc.type === "none") return { type: "none" };
   if (tc.type === "tool" && typeof tc.name === "string") {
-    return { type: "tool", name: tc.name };
+    return { type: "tool", name: tc.name, disableParallelToolUse };
   }
   return undefined;
 }
 
-function budgetToEffort(budget: number): "low" | "medium" | "high" {
+function budgetToEffort(budget: number): IR.ReasoningEffort {
   if (budget <= 4_000) return "low";
   if (budget <= 16_000) return "medium";
   return "high";
 }
 
-function parseThinking(
+function parseReasoningEffort(
   t: unknown,
-  outputEffort?: "low" | "medium" | "high" | "max",
-): IR.ThinkingConfig | undefined {
-  // Normalize "max" → "high" (OpenAI doesn't support "max")
-  const effort = outputEffort === "max" ? "high" : outputEffort;
-
+  outputEffort?: "low" | "medium" | "high" | "xhigh" | "max",
+): IR.ReasoningEffort | undefined {
+  if (outputEffort) return outputEffort;
   if (!isRecord(t)) return undefined;
-
+  if (t.type === "disabled") return "none";
   if (t.type === "enabled" && typeof t.budget_tokens === "number") {
-    return {
-      type: "enabled",
-      budgetTokens: t.budget_tokens,
-      effort: effort ?? budgetToEffort(t.budget_tokens),
-    };
-  }
-  if (t.type === "adaptive") {
-    return { type: "enabled", budgetTokens: 0, effort };
+    return budgetToEffort(t.budget_tokens);
   }
   return undefined;
 }
@@ -101,7 +106,6 @@ function parseImageBlock(block: ImageBlock): IR.ImageContent {
       url: `data:${block.source.media_type};base64,${block.source.data}`,
     };
   }
-  // URL type
   return { type: "image", url: block.source.url };
 }
 
@@ -137,6 +141,17 @@ export function fromRequest(body: RequestBody): IR.Request {
         content.push(parseImageBlock(block));
         continue;
       }
+      if (block.type === "thinking") {
+        const item = decodeReasoningItem(block.signature);
+        if (item) content.push({ type: "reasoning", item });
+        continue;
+      }
+      if (block.type === "mid_conv_system") {
+        for (const item of block.content) {
+          content.push({ type: "text", text: item.text });
+        }
+        continue;
+      }
       if (block.type === "tool_use") {
         content.push({
           type: "tool_call",
@@ -146,14 +161,12 @@ export function fromRequest(body: RequestBody): IR.Request {
         });
         continue;
       }
-      if (block.type === "tool_result") {
-        content.push({
-          type: "tool_result",
-          id: block.tool_use_id,
-          output: block.content,
-        });
-      }
-      // thinking blocks are ignored - OpenAI doesn't need them
+      content.push({
+        type: "tool_result",
+        id: block.tool_use_id,
+        output: block.content,
+        isError: block.is_error,
+      });
     }
     messages.push({ role: msg.role, content });
   }
@@ -182,6 +195,9 @@ export function fromRequest(body: RequestBody): IR.Request {
     topP: body.top_p,
     stopSequences: body.stop_sequences,
     toolChoice: parseToolChoice(body.tool_choice),
-    thinking: parseThinking(body.thinking, body.output_config?.effort),
+    reasoningEffort: parseReasoningEffort(
+      body.thinking,
+      body.output_config?.effort,
+    ),
   };
 }

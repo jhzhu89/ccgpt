@@ -7,12 +7,11 @@ import type {
   ResponseCreatedEvent,
   ResponseCompletedEvent,
   ResponseOutputItemAddedEvent,
+  ResponseOutputItemDoneEvent,
   ResponseTextDeltaEvent,
   ResponseTextDoneEvent,
   ResponseFunctionCallArgumentsDeltaEvent,
   ResponseFunctionCallArgumentsDoneEvent,
-  ResponseReasoningSummaryTextDeltaEvent,
-  ResponseReasoningSummaryTextDoneEvent,
   ResponseFailedEvent,
   ResponseIncompleteEvent,
 } from "openai/resources/responses/responses.js";
@@ -65,22 +64,16 @@ export function isFunctionCallArgumentsDoneEvent(
   return event.type === "response.function_call_arguments.done";
 }
 
-export function isReasoningTextDeltaEvent(
-  event: ResponseStreamEvent,
-): event is ResponseReasoningSummaryTextDeltaEvent {
-  return event.type === "response.reasoning_summary_text.delta";
-}
-
-export function isReasoningTextDoneEvent(
-  event: ResponseStreamEvent,
-): event is ResponseReasoningSummaryTextDoneEvent {
-  return event.type === "response.reasoning_summary_text.done";
-}
-
 export function isOutputItemAddedEvent(
   event: ResponseStreamEvent,
 ): event is ResponseOutputItemAddedEvent {
   return event.type === "response.output_item.added";
+}
+
+export function isOutputItemDoneEvent(
+  event: ResponseStreamEvent,
+): event is ResponseOutputItemDoneEvent {
+  return event.type === "response.output_item.done";
 }
 
 export function isCompletedEvent(

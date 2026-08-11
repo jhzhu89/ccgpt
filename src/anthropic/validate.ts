@@ -11,6 +11,7 @@ const toolResultBlock = z.object({
   type: z.literal("tool_result"),
   tool_use_id: z.string(),
   content: z.unknown(),
+  is_error: z.boolean().optional(),
 });
 
 const imageSource = z.union([
@@ -27,6 +28,12 @@ const imageBlock = z.object({ type: z.literal("image"), source: imageSource });
 const thinkingBlock = z.object({
   type: z.literal("thinking"),
   thinking: z.string(),
+  signature: z.string(),
+});
+
+const midConversationSystemBlock = z.object({
+  type: z.literal("mid_conv_system"),
+  content: z.array(textBlock),
 });
 
 const contentBlock = z.union([
@@ -35,11 +42,12 @@ const contentBlock = z.union([
   toolResultBlock,
   imageBlock,
   thinkingBlock,
+  midConversationSystemBlock,
 ]);
 const content = z.union([z.string(), z.array(contentBlock)]);
 
 const message = z.object({
-  role: z.enum(["user", "assistant"]),
+  role: z.enum(["user", "assistant", "system"]),
   content,
 });
 
@@ -55,15 +63,30 @@ const tool = z.object({
 });
 
 const toolChoice = z.union([
-  z.object({ type: z.literal("auto") }),
-  z.object({ type: z.literal("any") }),
-  z.object({ type: z.literal("tool"), name: z.string() }),
+  z.object({
+    type: z.literal("auto"),
+    disable_parallel_tool_use: z.boolean().optional(),
+  }),
+  z.object({
+    type: z.literal("any"),
+    disable_parallel_tool_use: z.boolean().optional(),
+  }),
+  z.object({
+    type: z.literal("tool"),
+    name: z.string(),
+    disable_parallel_tool_use: z.boolean().optional(),
+  }),
+  z.object({ type: z.literal("none") }),
 ]);
 
-const thinking = z.object({
-  type: z.string(),
-  budget_tokens: z.number().optional(),
-});
+const thinking = z.union([
+  z.object({
+    type: z.literal("enabled"),
+    budget_tokens: z.number(),
+  }),
+  z.object({ type: z.literal("adaptive") }),
+  z.object({ type: z.literal("disabled") }),
+]);
 
 const schema = z.object({
   model: z.string(),
@@ -79,7 +102,9 @@ const schema = z.object({
   tool_choice: toolChoice.optional(),
   thinking: thinking.optional(),
   output_config: z
-    .object({ effort: z.enum(["low", "medium", "high", "max"]).optional() })
+    .object({
+      effort: z.enum(["low", "medium", "high", "xhigh", "max"]).optional(),
+    })
     .optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
 });

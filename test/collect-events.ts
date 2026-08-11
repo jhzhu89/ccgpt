@@ -18,7 +18,11 @@ interface CollectedEvent {
 }
 
 async function collectEvents(): Promise<void> {
-  const app = createApp(createClient());
+  const client = await createClient({ kind: "copilot" });
+  const models = await client.models.list();
+  const { createCopilotModelRouter } = await import("../src/config/index.js");
+  const router = createCopilotModelRouter(models.data);
+  const app = createApp(client, (requested) => router.resolve(requested));
   const server = Bun.serve({ fetch: app.fetch, port: 0 });
   const baseURL = `http://localhost:${String(server.port)}`;
 

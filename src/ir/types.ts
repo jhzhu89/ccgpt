@@ -3,6 +3,20 @@ export type Role = "system" | "user" | "assistant";
 export type TextContent = { type: "text"; text: string };
 export type ImageContent = { type: "image"; url: string };
 
+export type ReasoningItem = {
+  id: string;
+  type: "reasoning";
+  summary: Array<{ type: "summary_text"; text: string }>;
+  encrypted_content?: string | null;
+  content?: Array<{ type: "reasoning_text"; text: string }>;
+  status?: "in_progress" | "completed" | "incomplete";
+};
+
+export type ReasoningContent = {
+  type: "reasoning";
+  item: ReasoningItem;
+};
+
 export type ToolCall = {
   type: "tool_call";
   id: string;
@@ -14,9 +28,15 @@ export type ToolResult = {
   type: "tool_result";
   id: string;
   output: unknown;
+  isError?: boolean;
 };
 
-export type Content = TextContent | ImageContent | ToolCall | ToolResult;
+export type Content =
+  | TextContent
+  | ImageContent
+  | ReasoningContent
+  | ToolCall
+  | ToolResult;
 
 export type Message = {
   role: Role;
@@ -30,15 +50,18 @@ export interface ToolDefinition {
 }
 
 export type ToolChoice =
-  | { type: "auto" }
-  | { type: "any" }
-  | { type: "tool"; name: string };
+  | { type: "auto"; disableParallelToolUse?: boolean }
+  | { type: "any"; disableParallelToolUse?: boolean }
+  | { type: "tool"; name: string; disableParallelToolUse?: boolean }
+  | { type: "none" };
 
-export type ThinkingConfig = {
-  type: "enabled";
-  budgetTokens: number;
-  effort?: "low" | "medium" | "high";
-};
+export type ReasoningEffort =
+  | "none"
+  | "low"
+  | "medium"
+  | "high"
+  | "xhigh"
+  | "max";
 
 export type Request = {
   model: string;
@@ -50,12 +73,12 @@ export type Request = {
   topP?: number;
   stopSequences?: string[];
   toolChoice?: ToolChoice;
-  thinking?: ThinkingConfig;
+  reasoningEffort?: ReasoningEffort;
 };
 
 export type StopReason = "end_turn" | "tool_use" | "max_tokens";
 
-export type ResponseContent = TextContent | ToolCall;
+export type ResponseContent = ReasoningContent | TextContent | ToolCall;
 
 export type Response = {
   content: ResponseContent[];
@@ -66,8 +89,7 @@ export type Response = {
 export type StreamStart = { type: "stream_start" };
 export type TextDelta = { type: "text_delta"; text: string };
 export type TextDone = { type: "text_done" };
-export type ThinkingDelta = { type: "thinking_delta"; thinking: string };
-export type ThinkingDone = { type: "thinking_done" };
+export type ReasoningDone = { type: "reasoning_done"; item: ReasoningItem };
 export type ToolCallStart = {
   type: "tool_call_start";
   id: string;
@@ -90,8 +112,7 @@ export type StreamEvent =
   | StreamStart
   | TextDelta
   | TextDone
-  | ThinkingDelta
-  | ThinkingDone
+  | ReasoningDone
   | ToolCallStart
   | ToolCallDelta
   | ToolCallDone

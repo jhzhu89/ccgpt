@@ -2,16 +2,16 @@ import type * as IR from "../ir/types.js";
 import type {
   ResponseStreamEvent,
   ResponseOutputItemAddedEvent,
+  ResponseReasoningItem,
 } from "openai/resources/responses/responses.js";
 import {
   isCreatedEvent,
   isTextDeltaEvent,
   isTextDoneEvent,
-  isReasoningTextDeltaEvent,
-  isReasoningTextDoneEvent,
   isFunctionCallArgumentsDeltaEvent,
   isFunctionCallArgumentsDoneEvent,
   isOutputItemAddedEvent,
+  isOutputItemDoneEvent,
   isCompletedEvent,
   isFailedEvent,
   isIncompleteEvent,
@@ -26,6 +26,12 @@ function isFunctionCallItem(
   return event.item.type === "function_call";
 }
 
+function isReasoningItem(item: {
+  type: string;
+}): item is ResponseReasoningItem {
+  return item.type === "reasoning";
+}
+
 export function* fromStreamEvent(
   event: ResponseStreamEvent,
 ): Generator<IR.StreamEvent> {
@@ -35,10 +41,6 @@ export function* fromStreamEvent(
     yield { type: "text_delta", text: event.delta };
   } else if (isTextDoneEvent(event)) {
     yield { type: "text_done" };
-  } else if (isReasoningTextDeltaEvent(event)) {
-    yield { type: "thinking_delta", thinking: event.delta };
-  } else if (isReasoningTextDoneEvent(event)) {
-    yield { type: "thinking_done" };
   } else if (isFunctionCallArgumentsDeltaEvent(event)) {
     yield { type: "tool_call_delta", id: event.item_id, args: event.delta };
   } else if (isFunctionCallArgumentsDoneEvent(event)) {
@@ -49,6 +51,12 @@ export function* fromStreamEvent(
       id: event.item.call_id,
       name: event.item.name,
     };
+  } else if (
+    isOutputItemDoneEvent(event) &&
+    isReasoningItem(event.item) &&
+    typeof event.item.encrypted_content === "string"
+  ) {
+    yield { type: "reasoning_done", item: event.item };
   } else if (isFailedEvent(event)) {
     yield {
       type: "error",

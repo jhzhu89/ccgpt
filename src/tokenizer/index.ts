@@ -26,6 +26,8 @@ export function countMessageTokens(messages: IR.Message[]): number {
         case "image":
           total += 85;
           break;
+        case "reasoning":
+          break;
       }
     }
   }

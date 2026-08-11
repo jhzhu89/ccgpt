@@ -1,205 +1,108 @@
-# m2r
+# ccgpt
 
-Anthropic Messages API → Azure OpenAI Responses API proxy.
-Enables Claude Code CLI and other Anthropic-compatible clients to use Azure OpenAI as the backend.
+Use GPT models from Claude Code through GitHub Copilot or an OpenAI-compatible Responses API.
 
-## Installation
+ccgpt translates the Anthropic Messages API expected by Claude Code directly to the Responses API. It does not use Chat Completions.
 
-```bash
-npm install -g @jhzhu89/m2r
-```
+## Quick start
 
-## Configuration
-
-Create `~/.m2rrc` with your Azure OpenAI settings (Entra ID only; API keys are not used):
+Requirements: [Bun](https://bun.sh), Git, and Claude Code CLI.
 
 ```bash
-# Required
-AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com
-
-# Optional
-AZURE_OPENAI_API_VERSION=2025-04-01-preview
-PROXY_PORT=8000
-LOG_LEVEL=info
-
-# Model routing (optional)
-MODEL_MAP={"claude-3-5-sonnet":"gpt-5.2"}
-TIER_HAIKU=gpt-5-mini
-TIER_SONNET=gpt-5.2
-TIER_OPUS=gpt-5.1-codex-max
+git clone https://github.com/jhzhu89/ccgpt.git
+cd ccgpt
+bun run setup
+ccgpt auth
+claude --model gpt-5.6-sol
 ```
 
-Auth uses `DefaultAzureCredential`, so ensure your environment is logged in (e.g., `az login`) or set the usual `AZURE_CLIENT_ID` / `AZURE_TENANT_ID` / `AZURE_CLIENT_SECRET`.
+`bun run setup` installs dependencies, builds ccgpt, links the local `ccgpt` command, and connects the `claude` shell command to ccgpt. Open a new shell after setup. It does not replace the Claude Code executable.
 
-Routing: `MODEL_MAP` overrides exact model aliases; otherwise `haiku`/`sonnet`/`opus` substrings map to the configured tier models.
+Run setup again after pulling code changes.
 
-## Usage
+## GitHub Copilot
 
-Start the proxy server:
+Copilot is the default backend. `ccgpt auth` authenticates with GitHub's device flow. The GitHub token is stored at `~/.local/share/ccgpt/github_token`, and short-lived Copilot tokens are refreshed automatically.
+
+At startup, ccgpt reads the available Copilot Responses models and routes Claude model families by tier:
+
+- Fable, Mythos, and Opus use the newest Sol model.
+- Sonnet uses the newest Terra model.
+- Haiku uses the newest Luna model.
+- Unknown Claude model families use the Sol tier.
+
+## API-key backend
+
+Create `~/.ccgptrc`:
 
 ```bash
-m2r
+CCGPT_API_KEY=your-api-key
+CCGPT_BASE_URL=https://api.openai.com/v1
+CCGPT_MODEL_HIGH=gpt-5.6-sol
+CCGPT_MODEL_BALANCED=gpt-5.6-terra
+CCGPT_MODEL_FAST=gpt-5.6-luna
 ```
 
-Then point your Anthropic client to `http://localhost:8000`.
+Only `CCGPT_API_KEY` is required. The base URL and model tiers shown above are the defaults. Generic OpenAI environment variables are intentionally ignored.
 
-## Linux (systemd user service)
+## Select a model
 
-Install and start:
+Claude Code remains the daily entry point. Its `--model` option selects a backend tier or an exact backend model:
 
 ```bash
-./scripts/m2r-service.sh install
+claude --model opus
+claude --model sonnet
+claude --model haiku
+claude --model gpt-5.6-sol
 ```
 
-Status and logs:
+Omit `--model` to use Claude Code's default model; ccgpt maps it to the matching backend tier automatically.
 
-```bash
-systemctl --user status m2r.service
-journalctl --user -u m2r.service -f
-```
+With Copilot, exact model IDs must be advertised by the endpoint. With an API-key backend, non-Claude model IDs pass through unchanged.
 
-Enable start on boot without login:
+Parallel tool calls are enabled only when the request contains tools, the selected model supports them, `tool_choice` is not `none`, and Claude Code has not disabled parallel tool use.
 
-```bash
-loginctl enable-linger $USER
-```
+The shell integration starts the gateway on a free local port, configures Claude Code, forwards all arguments, and stops the gateway when Claude Code exits.
 
-Uninstall:
+## Run the gateway manually
 
-```bash
-./scripts/m2r-service.sh uninstall
-```
+Run `ccgpt` to listen on port 8000. Set `CCGPT_PORT` in `~/.ccgptrc` to change it, then configure Claude Code to use that address.
 
-### Zsh / Bash (optional helpers)
-
-Add to `~/.zshrc` or `~/.bashrc`:
-
-```bash
-claude() {
-    local proxy_port=8000
-    local m2rrc="$HOME/.m2rrc"
-
-    if [[ -f "$m2rrc" ]]; then
-        local port_line=$(grep '^PROXY_PORT=' "$m2rrc")
-        if [[ -n "$port_line" ]]; then
-            proxy_port="${port_line#PROXY_PORT=}"
-        fi
-    fi
-
-    if ! nc -z localhost "$proxy_port" 2>/dev/null; then
-        echo "Starting m2r on port $proxy_port..."
-        mkdir -p "$HOME/.local/log"
-        nohup m2r >> "$HOME/.local/log/m2r.log" 2>&1 &
-        sleep 1
-    fi
-
-    ANTHROPIC_BASE_URL="http://localhost:$proxy_port" \
-    ANTHROPIC_API_KEY="x" \
-    CLAUDE_CODE_MAX_OUTPUT_TOKENS="64000" \
-    command claude "$@"
-}
-
-m2r-config() {
-    local m2rrc="$HOME/.m2rrc"
-    local action="$1"
-    local key="$2"
-    local value="$3"
-
-    mkdir -p "$(dirname "$m2rrc")"
-
-    case "$action" in
-        get)
-            [[ -z "$key" ]] && echo "Usage: m2r-config get KEY" && return 1
-            [[ -f "$m2rrc" ]] && grep -E "^${key}=" "$m2rrc" | tail -n 1 | cut -d= -f2-
-            ;;
-        set)
-            [[ -z "$key" || -z "$value" ]] && echo "Usage: m2r-config set KEY VALUE" && return 1
-            if [[ -f "$m2rrc" ]] && grep -q "^${key}=" "$m2rrc"; then
-                if sed --version >/dev/null 2>&1; then
-                    sed -i "s|^${key}=.*|${key}=${value}|" "$m2rrc"
-                else
-                    sed -i '' "s|^${key}=.*|${key}=${value}|" "$m2rrc"
-                fi
-            else
-                echo "${key}=${value}" >> "$m2rrc"
-            fi
-            ;;
-        list|"")
-            [[ -f "$m2rrc" ]] && cat "$m2rrc" || true
-            ;;
-        *)
-            echo "Usage: m2r-config [list|get KEY|set KEY VALUE]"
-            return 1
-            ;;
-    esac
-}
-```
-
-### PowerShell
-
-Add to your `$PROFILE`:
+PowerShell:
 
 ```powershell
-function Get-M2rPort {
-    $m2rrc = "$HOME\.m2rrc"
-    if (Test-Path $m2rrc) {
-        switch -Regex -File $m2rrc { '^PROXY_PORT=(\d+)' { return [int]$Matches[1] } }
-    }
-    return 8000
-}
-
-function Test-M2rRunning($port) {
-    try { $tcp = [System.Net.Sockets.TcpClient]::new("localhost", $port); $tcp.Dispose(); return $true } catch { return $false }
-}
-
-function Start-M2r($port) {
-    $logDir = "$HOME\.local\log"
-    New-Item -ItemType Directory -Path $logDir -Force -ErrorAction SilentlyContinue | Out-Null
-    Start-Process powershell -ArgumentList "-WindowStyle Hidden -Command `"m2r *>> '$logDir\m2r.log'`"" -WindowStyle Hidden
-    for ($i = 0; $i -lt 20; $i++) {
-        Start-Sleep -Milliseconds 250
-        if (Test-M2rRunning $port) { return $true }
-    }
-    return $false
-}
-
-function claude {
-    $port = Get-M2rPort
-    if (-not (Test-M2rRunning $port)) {
-        Write-Host "Starting m2r on port $port..." -ForegroundColor Cyan
-        if (-not (Start-M2r $port)) { Write-Host "Failed to start m2r" -ForegroundColor Red; return }
-    }
-    $env:ANTHROPIC_BASE_URL = "http://localhost:$port"
-    $env:ANTHROPIC_API_KEY = "x"
-    $env:CLAUDE_CODE_MAX_OUTPUT_TOKENS = "64000"
-    & (Get-Command claude -CommandType Application)[0].Source @args
-}
-
-function m2r-restart {
-    $port = Get-M2rPort
-    $stopped = $false
-    Get-CimInstance Win32_Process -Filter "Name='bun.exe'" | Where-Object { $_.CommandLine -match 'm2r' } | ForEach-Object {
-        Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
-        $stopped = $true
-    }
-    Write-Host $(if ($stopped) { "Stopped m2r" } else { "m2r not running" })
-    if (Start-M2r $port) { Write-Host "m2r started on port $port" } else { Write-Host "Failed to start m2r" -ForegroundColor Red }
-}
-
-function m2r-log {
-    param([switch]$Follow, [int]$Tail = 50)
-    $log = "$HOME\.local\log\m2r.log"
-    if (-not (Test-Path $log)) {
-        Write-Host "Log file not found: $log" -ForegroundColor Yellow
-        return
-    }
-    if ($Follow) {
-        Get-Content $log -Wait -Tail $Tail
-    } else {
-        Get-Content $log -Tail $Tail
-    }
-}
+$env:ANTHROPIC_BASE_URL = "http://localhost:8000"
+$env:ANTHROPIC_AUTH_TOKEN = "ccgpt"
+claude
 ```
+
+Bash or Zsh:
+
+```bash
+ANTHROPIC_BASE_URL=http://localhost:8000 \
+ANTHROPIC_AUTH_TOKEN=ccgpt \
+claude
+```
+
+## Verify locally
+
+```bash
+bun run lint
+bun run test
+bun run build
+```
+
+Live Copilot tests require `ccgpt auth`:
+
+```bash
+bun run test:integration
+```
+
+## Endpoints
+
+- `POST /v1/messages`
+- `POST /v1/messages/count_tokens`
+- `GET /health`
 
 ## License
 

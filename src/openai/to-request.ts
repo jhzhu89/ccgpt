@@ -1,4 +1,4 @@
-import { resolveModelConfig, type ModelConfig } from "../config/index.js";
+import type { ModelConfig, ResolvedModel } from "../config/index.js";
 import type * as IR from "../ir/types.js";
 import type {
   ResponseCreateParamsNonStreaming,
@@ -9,16 +9,40 @@ import type {
 
 function mapToolChoice(
   tc: IR.ToolChoice | undefined,
-): "required" | ToolChoiceFunction | undefined {
+): "none" | "required" | ToolChoiceFunction | undefined {
   if (!tc || tc.type === "auto") return undefined;
   if (tc.type === "any") return "required";
+  if (tc.type === "none") return "none";
   return { type: "function", name: tc.name };
+}
+
+function isTextBlock(value: unknown): value is { type: "text"; text: string } {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "type" in value &&
+    value.type === "text" &&
+    "text" in value &&
+    typeof value.text === "string"
+  );
+}
+
+function toolResultText(result: IR.ToolResult): string {
+  let output: string;
+  if (typeof result.output === "string") {
+    output = result.output;
+  } else if (Array.isArray(result.output) && result.output.every(isTextBlock)) {
+    output = result.output.map((item) => item.text).join("\n");
+  } else {
+    output = JSON.stringify(result.output);
+  }
+  return result.isError ? `Error: ${output}` : output;
 }
 
 function buildInput(ir: IR.Request): {
   input: ResponseInputItem[];
   tools?: ResponseCreateParamsNonStreaming["tools"];
-  toolChoice?: "required" | ToolChoiceFunction;
+  toolChoice?: "none" | "required" | ToolChoiceFunction;
 } {
   const input: ResponseInputItem[] = [];
 
@@ -34,7 +58,13 @@ function buildInput(ir: IR.Request): {
     }
 
     if (msg.role === "user") {
-      const parts: ResponseInputContent[] = [];
+      let parts: ResponseInputContent[] = [];
+      const flushParts = (): void => {
+        if (parts.length === 0) return;
+        input.push({ type: "message", role: "user", content: parts });
+        parts = [];
+      };
+
       for (const c of msg.content) {
         if (c.type === "text") {
           parts.push({ type: "input_text", text: c.text });
@@ -45,20 +75,23 @@ function buildInput(ir: IR.Request): {
           continue;
         }
         if (c.type === "tool_result") {
+          flushParts();
           input.push({
             type: "function_call_output",
             call_id: c.id,
-            output: JSON.stringify(c.output),
+            output: toolResultText(c),
           });
         }
       }
-      if (parts.length > 0) {
-        input.push({ type: "message", role: "user", content: parts });
-      }
+      flushParts();
       continue;
     }
 
     for (const c of msg.content) {
+      if (c.type === "reasoning") {
+        input.push(c.item);
+        continue;
+      }
       if (c.type === "text") {
         input.push({
           type: "message",
@@ -83,7 +116,7 @@ function buildInput(ir: IR.Request): {
     name: t.name,
     description: t.description,
     parameters: { type: "object", ...t.inputSchema },
-    strict: null,
+    strict: false,
   }));
 
   const toolChoice = mapToolChoice(ir.toolChoice);
@@ -98,24 +131,39 @@ export function buildOpenAIRequest(
 ): ResponseCreateParamsNonStreaming {
   const { input, tools, toolChoice } = buildInput(ir);
 
-  const reasoning = modelConfig.supportsReasoningSummaries
-    ? {
-        effort:
-          ir.thinking?.effort ?? modelConfig.defaultReasoningEffort ?? "medium",
-        summary: "auto" as const,
-      }
+  if (
+    ir.reasoningEffort &&
+    !modelConfig.reasoningEfforts.includes(ir.reasoningEffort)
+  ) {
+    throw new Error(
+      `${model} does not support reasoning effort ${ir.reasoningEffort}`,
+    );
+  }
+
+  const reasoningEffort =
+    ir.reasoningEffort ??
+    (modelConfig.reasoningEfforts.includes("medium") ? "medium" : undefined);
+  const reasoning = reasoningEffort ? { effort: reasoningEffort } : undefined;
+  const parallelDisabled =
+    ir.toolChoice !== undefined &&
+    ir.toolChoice.type !== "none" &&
+    ir.toolChoice.disableParallelToolUse === true;
+  const parallelToolCalls = tools?.length
+    ? modelConfig.supportsParallelToolCalls &&
+      toolChoice !== "none" &&
+      !parallelDisabled
     : undefined;
 
   return {
     model,
     input,
-    store: true,
-    parallel_tool_calls: modelConfig.supportsParallelToolCalls,
+    ...(parallelToolCalls !== undefined && {
+      parallel_tool_calls: parallelToolCalls,
+    }),
     ...(reasoning && { reasoning, include: ["reasoning.encrypted_content"] }),
     ...(tools?.length && { tools }),
     ...(toolChoice && { tool_choice: toolChoice }),
-    ...(ir.maxTokens &&
-      ir.maxTokens >= 16 && { max_output_tokens: ir.maxTokens }),
+    ...(ir.maxTokens !== undefined && { max_output_tokens: ir.maxTokens }),
     ...(ir.temperature !== undefined && { temperature: ir.temperature }),
     ...(ir.topP !== undefined && { top_p: ir.topP }),
   };
@@ -123,8 +171,7 @@ export function buildOpenAIRequest(
 
 export function toResponsesRequest(
   ir: IR.Request,
-  resolved?: { model: string; config: ModelConfig },
+  resolved: ResolvedModel,
 ): ResponseCreateParamsNonStreaming {
-  const resolution = resolved ?? resolveModelConfig(ir.model);
-  return buildOpenAIRequest(ir, resolution.model, resolution.config);
+  return buildOpenAIRequest(ir, resolved.model, resolved.config);
 }

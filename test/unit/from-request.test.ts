@@ -1,6 +1,8 @@
 import { describe, it, expect } from "bun:test";
 import type { ValidatedRequest } from "../../src/anthropic/validate.js";
 import { fromRequest } from "../../src/anthropic/from-request.js";
+import { encodeReasoningItem } from "../../src/anthropic/reasoning.js";
+import type { ReasoningItem } from "../../src/ir/types.js";
 
 describe("fromRequest", () => {
   it("parses basic text message", () => {
@@ -26,6 +28,28 @@ describe("fromRequest", () => {
     expect(ir.messages[0].content[0]).toEqual({
       type: "text",
       text: "You are helpful",
+    });
+  });
+
+  it("parses a mid-conversation system message", () => {
+    const body: ValidatedRequest = {
+      model: "claude-3",
+      max_tokens: 100,
+      messages: [
+        {
+          role: "system",
+          content: [
+            {
+              type: "mid_conv_system",
+              content: [{ type: "text", text: "Use the updated constraint" }],
+            },
+          ],
+        },
+      ],
+    };
+    expect(fromRequest(body).messages[0]).toEqual({
+      role: "system",
+      content: [{ type: "text", text: "Use the updated constraint" }],
     });
   });
 
@@ -73,6 +97,16 @@ describe("fromRequest", () => {
     expect(ir.toolChoice).toEqual({ type: "tool", name: "calculator" });
   });
 
+  it("parses tool_choice none", () => {
+    const body: ValidatedRequest = {
+      model: "claude-3",
+      max_tokens: 100,
+      messages: [{ role: "user", content: "hi" }],
+      tool_choice: { type: "none" },
+    };
+    expect(fromRequest(body).toolChoice).toEqual({ type: "none" });
+  });
+
   it("parses thinking config", () => {
     const body: ValidatedRequest = {
       model: "claude-3",
@@ -81,7 +115,48 @@ describe("fromRequest", () => {
       thinking: { type: "enabled", budget_tokens: 5000 },
     };
     const ir = fromRequest(body);
-    expect(ir.thinking).toEqual({ type: "enabled", budgetTokens: 5000, effort: "medium" });
+    expect(ir.reasoningEffort).toBe("medium");
+  });
+
+  it("preserves xhigh and max effort", () => {
+    const body: ValidatedRequest = {
+      model: "claude-3",
+      max_tokens: 100,
+      messages: [{ role: "user", content: "hi" }],
+      output_config: { effort: "xhigh" },
+    };
+    expect(fromRequest(body).reasoningEffort).toBe("xhigh");
+    body.output_config = { effort: "max" };
+    expect(fromRequest(body).reasoningEffort).toBe("max");
+  });
+
+  it("decodes reasoning from a thinking signature", () => {
+    const item: ReasoningItem = {
+      id: "reasoning_1",
+      type: "reasoning",
+      summary: [],
+      encrypted_content: "encrypted",
+    };
+    const body: ValidatedRequest = {
+      model: "claude-3",
+      max_tokens: 100,
+      messages: [
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "thinking",
+              thinking: "",
+              signature: encodeReasoningItem(item),
+            },
+          ],
+        },
+      ],
+    };
+    expect(fromRequest(body).messages[0].content[0]).toEqual({
+      type: "reasoning",
+      item,
+    });
   });
 
   it("parses image block with base64", () => {

@@ -1,6 +1,7 @@
 import type * as IR from "../ir/types.js";
 import { sseEvent } from "./sse.js";
 import { generateId } from "../ir/normalize.js";
+import { encodeReasoningItem } from "./reasoning.js";
 
 export interface StreamContext {
   model: string;
@@ -21,11 +22,8 @@ export class StreamTranslator {
       case "stream_start":
         yield* this.handleStreamStart();
         break;
-      case "thinking_delta":
-        yield* this.handleThinkingDelta(event);
-        break;
-      case "thinking_done":
-        yield* this.handleThinkingDone();
+      case "reasoning_done":
+        yield* this.handleReasoningDone(event);
         break;
       case "text_delta":
         yield* this.handleTextDelta(event);
@@ -76,24 +74,26 @@ export class StreamTranslator {
     this.blockOpen = false;
   }
 
-  private *handleThinkingDelta(event: IR.ThinkingDelta): Generator<string> {
-    if (!this.blockOpen) {
-      yield sseEvent("content_block_start", {
-        type: "content_block_start",
-        index: this.blockIndex,
-        content_block: { type: "thinking", thinking: "" },
-      });
-      this.blockOpen = true;
-    }
+  private *handleReasoningDone(event: IR.ReasoningDone): Generator<string> {
+    yield* this.closeBlock();
+    yield sseEvent("content_block_start", {
+      type: "content_block_start",
+      index: this.blockIndex,
+      content_block: { type: "thinking", thinking: "", signature: "" },
+    });
     yield sseEvent("content_block_delta", {
       type: "content_block_delta",
       index: this.blockIndex,
-      delta: { type: "thinking_delta", thinking: event.thinking },
+      delta: {
+        type: "signature_delta",
+        signature: encodeReasoningItem(event.item),
+      },
     });
-  }
-
-  private *handleThinkingDone(): Generator<string> {
-    yield* this.closeBlock();
+    yield sseEvent("content_block_stop", {
+      type: "content_block_stop",
+      index: this.blockIndex,
+    });
+    this.blockIndex++;
   }
 
   private *handleTextDelta(event: IR.TextDelta): Generator<string> {

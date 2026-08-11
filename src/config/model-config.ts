@@ -1,94 +1,40 @@
-export type ReasoningEffort = "low" | "medium" | "high";
+import type { ReasoningEffort } from "../ir/types.js";
+
+export interface CopilotModel {
+  id: string;
+  supported_endpoints?: string[];
+  capabilities?: {
+    supports?: {
+      parallel_tool_calls?: boolean;
+      reasoning_effort?: string[];
+    };
+  };
+}
 
 export interface ModelConfig {
   supportsParallelToolCalls: boolean;
-  supportsReasoningSummaries: boolean;
-  defaultReasoningEffort?: ReasoningEffort;
-  contextWindow: number;
+  reasoningEfforts: ReasoningEffort[];
 }
 
-const modelFamilies: ReadonlyArray<{ prefix: string; config: ModelConfig }> = [
-  {
-    prefix: "gpt-5.2-codex",
-    config: {
-      supportsParallelToolCalls: true,
-      supportsReasoningSummaries: true,
-      contextWindow: 272_000,
-    },
-  },
-  {
-    prefix: "gpt-5.1-codex-max",
-    config: {
-      supportsParallelToolCalls: false,
-      supportsReasoningSummaries: true,
-      defaultReasoningEffort: "medium",
-      contextWindow: 272_000,
-    },
-  },
-  {
-    prefix: "gpt-5.1-codex",
-    config: {
-      supportsParallelToolCalls: false,
-      supportsReasoningSummaries: true,
-      contextWindow: 272_000,
-    },
-  },
-  {
-    prefix: "gpt-5-codex",
-    config: {
-      supportsParallelToolCalls: false,
-      supportsReasoningSummaries: true,
-      contextWindow: 272_000,
-    },
-  },
-  {
-    prefix: "codex-",
-    config: {
-      supportsParallelToolCalls: false,
-      supportsReasoningSummaries: true,
-      contextWindow: 272_000,
-    },
-  },
-  {
-    prefix: "gpt-5.2",
-    config: {
-      supportsParallelToolCalls: true,
-      supportsReasoningSummaries: true,
-      defaultReasoningEffort: "medium",
-      contextWindow: 272_000,
-    },
-  },
-  {
-    prefix: "gpt-5.1",
-    config: {
-      supportsParallelToolCalls: true,
-      supportsReasoningSummaries: true,
-      defaultReasoningEffort: "medium",
-      contextWindow: 272_000,
-    },
-  },
-  {
-    prefix: "gpt-5",
-    config: {
-      supportsParallelToolCalls: false,
-      supportsReasoningSummaries: true,
-      contextWindow: 272_000,
-    },
-  },
-];
+const reasoningEfforts = new Set<ReasoningEffort>([
+  "none",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+]);
 
-const defaultConfig: ModelConfig = {
-  supportsParallelToolCalls: false,
-  supportsReasoningSummaries: false,
-  contextWindow: 128_000,
-};
+function isReasoningEffort(value: string): value is ReasoningEffort {
+  return reasoningEfforts.has(value as ReasoningEffort);
+}
 
-export function getModelConfig(slug: string): ModelConfig {
-  const lower = slug.toLowerCase();
-  for (const { prefix, config } of modelFamilies) {
-    if (lower.startsWith(prefix)) {
-      return config;
-    }
-  }
-  return defaultConfig;
+export function getModelConfig(model: CopilotModel): ModelConfig {
+  const supports = model.capabilities?.supports;
+  return {
+    supportsParallelToolCalls: supports?.parallel_tool_calls === true,
+    reasoningEfforts: (supports?.reasoning_effort ?? []).filter(
+      isReasoningEffort,
+    ),
+  };
 }

@@ -6,7 +6,9 @@ let server: ReturnType<typeof Bun.serve>;
 let baseURL: string;
 
 beforeAll(() => {
-  const app = createApp(null as unknown as OpenAIClient);
+  const app = createApp(null as unknown as OpenAIClient, () => {
+    throw new Error("model resolution is not expected in this test");
+  });
   server = Bun.serve({ fetch: app.fetch, port: 0 });
   baseURL = `http://localhost:${String(server.port)}`;
 });

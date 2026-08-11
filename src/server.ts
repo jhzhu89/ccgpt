@@ -12,9 +12,12 @@ import type { OpenAIClient } from "./openai/client.js";
 import { generateId } from "./ir/normalize.js";
 import { logger } from "./logger.js";
 import { countMessageTokens, countToolTokens } from "./tokenizer/index.js";
-import { resolveModelConfig } from "./config/index.js";
+import type { ModelRouter } from "./config/index.js";
 
-export function createApp(client: OpenAIClient): Hono {
+export function createApp(
+  client: OpenAIClient,
+  resolveModel: ModelRouter["resolve"],
+): Hono {
   const app = new Hono();
 
   app.post("/v1/messages/count_tokens", async (c) => {
@@ -44,8 +47,6 @@ export function createApp(client: OpenAIClient): Hono {
   app.post("/v1/messages", async (c) => {
     const body: unknown = await c.req.json();
 
-    // logger.debug({ body }, "incoming request body");
-
     const validation = validate(body);
 
     if (!validation.ok) {
@@ -61,7 +62,16 @@ export function createApp(client: OpenAIClient): Hono {
 
     const ir = fromRequest(validation.data);
     const reqId = generateId("req");
-    const resolved = resolveModelConfig(ir.model);
+    let resolved;
+    try {
+      resolved = resolveModel(ir.model);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Invalid model";
+      return c.json(
+        { type: "error", error: { type: "invalid_request_error", message } },
+        400,
+      );
+    }
     c.header("x-request-id", reqId);
 
     logger.info(
@@ -72,14 +82,14 @@ export function createApp(client: OpenAIClient): Hono {
         stream: ir.stream,
         maxTokens: ir.maxTokens,
         tools: ir.tools?.length ?? 0,
-        thinking: ir.thinking?.type === "enabled",
+        reasoningEffort: ir.reasoningEffort,
       },
       "request received",
     );
 
     if (!ir.stream) {
-      const openaiReq = toResponsesRequest(ir, resolved);
       try {
+        const openaiReq = toResponsesRequest(ir, resolved);
         const openaiRes = await client.responses.create(openaiReq);
         const irRes = fromResponse(openaiRes);
         const anthropicRes = toResponse(irRes, ir.model);
@@ -104,8 +114,8 @@ export function createApp(client: OpenAIClient): Hono {
     c.header("Connection", "keep-alive");
 
     return stream(c, async (s) => {
-      const openaiReq = toResponsesRequest(ir, resolved);
       try {
+        const openaiReq = toResponsesRequest(ir, resolved);
         const openaiStream = await client.responses.create({
           ...openaiReq,
           stream: true,

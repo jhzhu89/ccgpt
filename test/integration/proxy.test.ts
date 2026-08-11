@@ -1,14 +1,44 @@
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import Anthropic from "@anthropic-ai/sdk";
+import type { ContentBlockParam } from "@anthropic-ai/sdk/resources/messages/messages.js";
 import { createApp } from "../../src/server.js";
 import { createClient } from "../../src/openai/client.js";
+import { createCopilotModelRouter } from "../../src/config/index.js";
 
 let server: ReturnType<typeof Bun.serve>;
 let client: Anthropic;
 let baseURL: string;
 
-beforeAll(() => {
-  const app = createApp(createClient());
+function replayableContent(
+  content: Anthropic.Messages.ContentBlock[],
+): ContentBlockParam[] {
+  const replay: ContentBlockParam[] = [];
+  for (const block of content) {
+    if (block.type === "thinking") {
+      replay.push({
+        type: "thinking",
+        thinking: block.thinking,
+        signature: block.signature,
+      });
+    } else if (block.type === "text") {
+      replay.push({ type: "text", text: block.text });
+    } else if (block.type === "tool_use") {
+      replay.push({
+        type: "tool_use",
+        id: block.id,
+        name: block.name,
+        input: block.input,
+      });
+    }
+  }
+  return replay;
+}
+
+beforeAll(async () => {
+  const openai = await createClient({ kind: "copilot" });
+  const models = await openai.models.list();
+  const router = createCopilotModelRouter(models.data);
+  const app = createApp(openai, (requested) => router.resolve(requested));
   server = Bun.serve({ fetch: app.fetch, port: 0 });
   baseURL = `http://localhost:${String(server.port)}`;
   client = new Anthropic({ baseURL, apiKey: "dummy" });
@@ -82,4 +112,68 @@ describe("proxy integration", () => {
     expect(toolUse?.input).toHaveProperty("a");
     expect(toolUse?.input).toHaveProperty("b");
   });
+
+  it("replays streamed reasoning through a tool round trip", async () => {
+    const prompt =
+      "Three warehouses hold 17, 23, and 29 crates. Each crate contains 13 boxes, and each box weighs 7 kg. Determine the total weight. Use the multiply tool exactly once after working out the two factors.";
+    const tools = [
+      {
+        name: "multiply",
+        description: "Multiply two numbers",
+        input_schema: {
+          type: "object" as const,
+          properties: {
+            a: { type: "number" },
+            b: { type: "number" },
+          },
+          required: ["a", "b"],
+        },
+      },
+    ];
+
+    const first = await client.messages
+      .stream({
+        model: "opus",
+        max_tokens: 2000,
+        output_config: { effort: "high" },
+        messages: [{ role: "user", content: prompt }],
+        tools,
+      })
+      .finalMessage();
+
+    const thinking = first.content.find((block) => block.type === "thinking");
+    const toolUse = first.content.find((block) => block.type === "tool_use");
+    expect(thinking?.type).toBe("thinking");
+    expect(thinking?.signature).toStartWith("ccgpt:");
+    expect(toolUse?.type).toBe("tool_use");
+    if (toolUse?.type !== "tool_use") throw new Error("Tool call missing");
+    expect(toolUse.input).toEqual({ a: 69, b: 91 });
+
+    const second = await client.messages
+      .stream({
+        model: "opus",
+        max_tokens: 2000,
+        output_config: { effort: "high" },
+        messages: [
+          { role: "user", content: prompt },
+          { role: "assistant", content: replayableContent(first.content) },
+          {
+            role: "user",
+            content: [
+              {
+                type: "tool_result",
+                tool_use_id: toolUse.id,
+                content: "6279",
+              },
+            ],
+          },
+        ],
+        tools,
+      })
+      .finalMessage();
+
+    const answer = second.content.find((block) => block.type === "text");
+    expect(answer?.type).toBe("text");
+    expect(answer?.text).toMatch(/total weight/i);
+  }, 60000);
 });
