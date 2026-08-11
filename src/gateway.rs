@@ -16,6 +16,7 @@ use uuid::Uuid;
 
 use crate::auth::{CopilotTokenProvider, default_github_token_path, load_github_token};
 use crate::config::{Backend, Config};
+use crate::diagnostics::{Diagnostics, detail};
 use crate::models::{ModelRouter, ModelTargets};
 use crate::protocol::StreamTranslator;
 use crate::protocol::{
@@ -24,7 +25,7 @@ use crate::protocol::{
 };
 use crate::tokenizer::count_request;
 
-use upstream::{Upstream, UpstreamError};
+use upstream::{CCGPT_UPSTREAM_REQUEST_ID_HEADER, Upstream, UpstreamError};
 
 pub mod upstream;
 
@@ -33,6 +34,7 @@ struct AppState {
     upstream: Upstream,
     models: Arc<ModelRouter>,
     auth_token: Arc<str>,
+    diagnostics: Diagnostics,
 }
 
 pub struct Gateway {
@@ -43,31 +45,71 @@ pub struct Gateway {
 }
 
 pub async fn initialize(config: &Config) -> Result<Gateway, String> {
-    let (upstream, models, backend) = match &config.backend {
-        Backend::Copilot => {
-            let path = default_github_token_path().map_err(|error| error.to_string())?;
-            let github_token = load_github_token(&path).map_err(|error| error.to_string())?;
-            let auth = CopilotTokenProvider::new(http_client()?, github_token)
-                .map_err(|error| error.to_string())?;
-            let upstream = Upstream::copilot(auth)?;
-            let catalog = upstream.models().await.map_err(|error| error.to_string())?;
-            let models = ModelRouter::copilot(catalog).map_err(|error| error.to_string())?;
-            (upstream, models, "copilot")
+    let diagnostics = Diagnostics::open(config.debug_file.as_deref())?;
+    let configured_backend = match config.backend {
+        Backend::Copilot => "copilot",
+        Backend::Direct { .. } => "direct",
+    };
+    diagnostics.record(
+        "gateway_initializing",
+        json!({
+            "backend": configured_backend,
+            "pid": std::process::id()
+        }),
+    );
+    let initialized: Result<_, String> = async {
+        Ok(match &config.backend {
+            Backend::Copilot => {
+                let path = default_github_token_path().map_err(|error| error.to_string())?;
+                let github_token = load_github_token(&path).map_err(|error| error.to_string())?;
+                let auth = CopilotTokenProvider::new(http_client()?, github_token)
+                    .map_err(|error| error.to_string())?;
+                let upstream = Upstream::copilot(auth)?;
+                let catalog = upstream.models().await.map_err(|error| error.to_string())?;
+                let models = ModelRouter::copilot(catalog).map_err(|error| error.to_string())?;
+                (upstream, models, "copilot")
+            }
+            Backend::Direct {
+                api_key,
+                base_url,
+                targets,
+            } => (
+                Upstream::direct(api_key.clone(), base_url.clone())?,
+                ModelRouter::direct(targets.clone()),
+                "direct",
+            ),
+        })
+    }
+    .await;
+    let (upstream, models, backend) = match initialized {
+        Ok(initialized) => initialized,
+        Err(error) => {
+            diagnostics.record(
+                "gateway_initialization_failed",
+                json!({
+                    "backend": configured_backend,
+                    "detail": detail(&error)
+                }),
+            );
+            return Err(error);
         }
-        Backend::Direct {
-            api_key,
-            base_url,
-            targets,
-        } => (
-            Upstream::direct(api_key.clone(), base_url.clone())?,
-            ModelRouter::direct(targets.clone()),
-            "direct",
-        ),
     };
     let targets = models.targets.clone();
     let auth_token = Uuid::new_v4().simple().to_string();
+    diagnostics.record(
+        "gateway_started",
+        json!({
+            "backend": backend,
+            "pid": std::process::id(),
+            "models": {
+                "high": targets.high,
+                "balanced": targets.balanced,
+                "fast": targets.fast
+            }
+        }),
+    );
     Ok(Gateway {
-        app: app(upstream, models, auth_token.clone()),
+        app: app_with_diagnostics(upstream, models, auth_token.clone(), diagnostics),
         backend,
         targets,
         auth_token,
@@ -75,6 +117,15 @@ pub async fn initialize(config: &Config) -> Result<Gateway, String> {
 }
 
 pub fn app(upstream: Upstream, models: ModelRouter, auth_token: impl Into<String>) -> Router {
+    app_with_diagnostics(upstream, models, auth_token, Diagnostics::default())
+}
+
+fn app_with_diagnostics(
+    upstream: Upstream,
+    models: ModelRouter,
+    auth_token: impl Into<String>,
+    diagnostics: Diagnostics,
+) -> Router {
     Router::new()
         .route("/health", get(health))
         .route("/v1/messages", post(messages))
@@ -84,6 +135,7 @@ pub fn app(upstream: Upstream, models: ModelRouter, auth_token: impl Into<String
             upstream,
             models: Arc::new(models),
             auth_token: Arc::from(auth_token.into()),
+            diagnostics,
         })
 }
 
@@ -114,6 +166,14 @@ async fn messages(State(state): State<AppState>, headers: HeaderMap, body: Bytes
     let request = match parse_request(&body) {
         Ok(request) => request,
         Err(message) => {
+            state.diagnostics.record(
+                "request_rejected",
+                json!({
+                    "request_id": request_id,
+                    "reason": "invalid_request",
+                    "detail": detail(&message)
+                }),
+            );
             return with_request_id(
                 error_response(400, "invalid_request_error", message),
                 &request_id,
@@ -123,12 +183,33 @@ async fn messages(State(state): State<AppState>, headers: HeaderMap, body: Bytes
     let resolved = match state.models.resolve(&request.model) {
         Ok(model) => model,
         Err(error) => {
+            state.diagnostics.record(
+                "request_rejected",
+                json!({
+                    "request_id": request_id,
+                    "reason": "model_resolution",
+                    "requested_model": request.model,
+                    "detail": detail(error.to_string())
+                }),
+            );
             return with_request_id(
                 error_response(400, "invalid_request_error", error.to_string()),
                 &request_id,
             );
         }
     };
+    state.diagnostics.record(
+        "request_started",
+        json!({
+            "request_id": request_id,
+            "requested_model": request.model,
+            "resolved_model": resolved.model,
+            "stream": request.stream,
+            "message_count": request.messages.len(),
+            "tool_count": request.tools.len(),
+            "max_output_tokens": request.max_output_tokens
+        }),
+    );
     let upstream_body = build_responses_request(
         &request,
         BuildOptions {
@@ -139,16 +220,46 @@ async fn messages(State(state): State<AppState>, headers: HeaderMap, body: Bytes
     );
     let upstream = match state.upstream.responses(&upstream_body).await {
         Ok(response) => response,
-        Err(error) => return with_request_id(upstream_error_response(error), &request_id),
+        Err(error) => {
+            state.diagnostics.record(
+                "upstream_request_failed",
+                json!({
+                    "request_id": request_id,
+                    "status": error.status,
+                    "upstream_request_id": error.request_id,
+                    "detail": detail(&error.message)
+                }),
+            );
+            return with_request_id(upstream_error_response(error), &request_id);
+        }
     };
 
     if request.stream {
-        return with_request_id(streaming_response(upstream, request.model), &request_id);
+        return with_request_id(
+            streaming_response(
+                upstream,
+                request.model,
+                resolved.model,
+                request_id.clone(),
+                state.diagnostics.clone(),
+            ),
+            &request_id,
+        );
     }
 
+    let upstream_request_id = response_request_id(upstream.headers());
     let response = match upstream.json::<Value>().await {
         Ok(value) => value,
         Err(error) => {
+            state.diagnostics.record(
+                "upstream_response_invalid",
+                json!({
+                    "request_id": request_id,
+                    "upstream_request_id": upstream_request_id,
+                    "reason": "invalid_json",
+                    "detail": detail(error.to_string())
+                }),
+            );
             return with_request_id(
                 error_response(502, "api_error", error.to_string()),
                 &request_id,
@@ -157,8 +268,29 @@ async fn messages(State(state): State<AppState>, headers: HeaderMap, body: Bytes
     };
     let response = match parse_responses_response(&response) {
         Ok(response) => response,
-        Err(error) => return with_request_id(error_response(502, "api_error", error), &request_id),
+        Err(error) => {
+            state.diagnostics.record(
+                "upstream_response_invalid",
+                json!({
+                    "request_id": request_id,
+                    "upstream_request_id": upstream_request_id,
+                    "reason": "invalid_response",
+                    "detail": detail(&error)
+                }),
+            );
+            return with_request_id(error_response(502, "api_error", error), &request_id);
+        }
     };
+    state.diagnostics.record(
+        "request_completed",
+        json!({
+            "request_id": request_id,
+            "upstream_request_id": upstream_request_id,
+            "stop_reason": response.stop_reason.as_str(),
+            "input_tokens": response.input_tokens,
+            "output_tokens": response.output_tokens
+        }),
+    );
     with_request_id(
         axum::Json(anthropic_response(response, &request.model)).into_response(),
         &request_id,
@@ -173,7 +305,25 @@ fn authorized(headers: &HeaderMap, expected: &str) -> bool {
         .is_some_and(|(scheme, token)| scheme.eq_ignore_ascii_case("bearer") && token == expected)
 }
 
-fn streaming_response(upstream: reqwest::Response, requested_model: String) -> Response {
+fn streaming_response(
+    upstream: reqwest::Response,
+    requested_model: String,
+    resolved_model: String,
+    request_id: String,
+    diagnostics: Diagnostics,
+) -> Response {
+    let upstream_status = upstream.status().as_u16();
+    let upstream_request_id = response_request_id(upstream.headers());
+    diagnostics.record(
+        "upstream_stream_opened",
+        json!({
+            "request_id": request_id,
+            "upstream_request_id": upstream_request_id,
+            "status": upstream_status,
+            "requested_model": requested_model,
+            "resolved_model": resolved_model
+        }),
+    );
     let output = stream! {
         let events = upstream.bytes_stream().eventsource();
         pin_mut!(events);
@@ -187,6 +337,13 @@ fn streaming_response(upstream: reqwest::Response, requested_model: String) -> R
                 next = events.next() => match next {
                     Some(Ok(event)) if event.data == "[DONE]" => {
                         if !translator.is_terminal() {
+                            record_stream_abort(
+                                &diagnostics,
+                                &request_id,
+                                upstream_request_id.as_deref(),
+                                "done_before_terminal",
+                                "Upstream stream ended before completion",
+                            );
                             let frames = translator.abort("Upstream stream ended before completion");
                             if !frames.is_empty() {
                                 yield Ok(Bytes::from(frames.concat()));
@@ -196,12 +353,28 @@ fn streaming_response(upstream: reqwest::Response, requested_model: String) -> R
                     },
                     Some(Ok(event)) => match serde_json::from_str::<Value>(&event.data) {
                         Ok(event) => {
+                            record_terminal_event(
+                                &diagnostics,
+                                &request_id,
+                                upstream_request_id.as_deref(),
+                                &event,
+                            );
                             let frames = translator.push(&event);
                             if !frames.is_empty() {
                                 yield Ok::<Bytes, Infallible>(Bytes::from(frames.concat()));
                             }
                         }
                         Err(error) => {
+                            diagnostics.record(
+                                "upstream_stream_aborted",
+                                json!({
+                                    "request_id": request_id,
+                                    "upstream_request_id": upstream_request_id,
+                                    "reason": "invalid_event_json",
+                                    "event_bytes": event.data.len(),
+                                    "detail": detail(error.to_string())
+                                }),
+                            );
                             let frames = translator.abort(error.to_string());
                             if !frames.is_empty() {
                                 yield Ok(Bytes::from(frames.concat()));
@@ -210,6 +383,13 @@ fn streaming_response(upstream: reqwest::Response, requested_model: String) -> R
                         }
                     },
                     Some(Err(error)) => {
+                        record_stream_abort(
+                            &diagnostics,
+                            &request_id,
+                            upstream_request_id.as_deref(),
+                            "sse_error",
+                            &error.to_string(),
+                        );
                         let frames = translator.abort(error.to_string());
                         if !frames.is_empty() {
                             yield Ok(Bytes::from(frames.concat()));
@@ -218,6 +398,13 @@ fn streaming_response(upstream: reqwest::Response, requested_model: String) -> R
                     }
                     None => {
                         if !translator.is_terminal() {
+                            record_stream_abort(
+                                &diagnostics,
+                                &request_id,
+                                upstream_request_id.as_deref(),
+                                "eof_before_terminal",
+                                "Upstream stream ended before completion",
+                            );
                             let frames = translator.abort("Upstream stream ended before completion");
                             if !frames.is_empty() {
                                 yield Ok(Bytes::from(frames.concat()));
@@ -238,6 +425,107 @@ fn streaming_response(upstream: reqwest::Response, requested_model: String) -> R
         .header(header::CACHE_CONTROL, "no-cache")
         .body(Body::from_stream(output))
         .expect("valid streaming response")
+}
+
+fn record_terminal_event(
+    diagnostics: &Diagnostics,
+    request_id: &str,
+    upstream_request_id: Option<&str>,
+    event: &Value,
+) {
+    let event_type = event.get("type").and_then(Value::as_str);
+    let response_id = event
+        .pointer("/response/id")
+        .and_then(Value::as_str)
+        .or_else(|| event.get("response_id").and_then(Value::as_str));
+    match event_type {
+        Some("response.completed") => diagnostics.record(
+            "upstream_stream_completed",
+            json!({
+                "request_id": request_id,
+                "upstream_request_id": upstream_request_id,
+                "response_id": response_id,
+                "status": event.pointer("/response/status").and_then(Value::as_str),
+                "input_tokens": event.pointer("/response/usage/input_tokens").and_then(Value::as_u64),
+                "output_tokens": event.pointer("/response/usage/output_tokens").and_then(Value::as_u64)
+            }),
+        ),
+        Some("response.incomplete") => diagnostics.record(
+            "upstream_stream_incomplete",
+            json!({
+                "request_id": request_id,
+                "upstream_request_id": upstream_request_id,
+                "response_id": response_id,
+                "status": event.pointer("/response/status").and_then(Value::as_str),
+                "reason": event.pointer("/response/incomplete_details/reason").and_then(Value::as_str),
+                "input_tokens": event.pointer("/response/usage/input_tokens").and_then(Value::as_u64),
+                "output_tokens": event.pointer("/response/usage/output_tokens").and_then(Value::as_u64)
+            }),
+        ),
+        Some("response.failed") | Some("error") => {
+            let code = event
+                .pointer("/response/error/code")
+                .or_else(|| event.pointer("/response/error/type"))
+                .or_else(|| event.pointer("/error/code"))
+                .or_else(|| event.pointer("/error/type"))
+                .or_else(|| event.get("code"))
+                .and_then(Value::as_str);
+            let message = event
+                .pointer("/response/error/message")
+                .or_else(|| event.pointer("/error/message"))
+                .or_else(|| event.get("message"))
+                .and_then(Value::as_str)
+                .unwrap_or("Upstream response failed");
+            diagnostics.record(
+                "upstream_stream_failed",
+                json!({
+                    "request_id": request_id,
+                    "upstream_request_id": upstream_request_id,
+                    "response_id": response_id,
+                    "status": event.pointer("/response/status").and_then(Value::as_str),
+                    "event_type": event_type,
+                    "code": code,
+                    "detail": detail(message)
+                }),
+            );
+        }
+        _ => {}
+    }
+}
+
+fn record_stream_abort(
+    diagnostics: &Diagnostics,
+    request_id: &str,
+    upstream_request_id: Option<&str>,
+    reason: &str,
+    message: &str,
+) {
+    diagnostics.record(
+        "upstream_stream_aborted",
+        json!({
+            "request_id": request_id,
+            "upstream_request_id": upstream_request_id,
+            "reason": reason,
+            "detail": detail(message)
+        }),
+    );
+}
+
+fn response_request_id(headers: &HeaderMap) -> Option<String> {
+    [
+        "x-request-id",
+        "x-github-request-id",
+        "request-id",
+        "openai-request-id",
+        CCGPT_UPSTREAM_REQUEST_ID_HEADER,
+    ]
+    .into_iter()
+    .find_map(|name| {
+        headers
+            .get(name)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned)
+    })
 }
 
 fn upstream_error_response(error: UpstreamError) -> Response {
@@ -483,5 +771,104 @@ mod tests {
         assert!(body.contains("\"stop_reason\":\"tool_use\""));
         assert!(body.contains("event: message_stop"));
         assert!(!body.contains("event: error"));
+    }
+
+    #[tokio::test]
+    async fn diagnoses_midstream_failures_without_logging_content() {
+        let sensitive_text = "private partial output";
+        let sse = format!(
+            "data: {{\"type\":\"response.created\"}}\n\n\
+             data: {{\"type\":\"response.output_text.delta\",\"output_index\":0,\"content_index\":0,\"delta\":\"{sensitive_text}\"}}\n\n\
+             data: {{\"type\":\"response.failed\",\"response\":{{\"id\":\"resp_failed\",\"error\":{{\"code\":\"server_error\",\"message\":\"model failed\"}}}}}}\n\n"
+        );
+        let fake = Router::new().route(
+            "/v1/responses",
+            post(move || async {
+                Response::builder()
+                    .header(header::CONTENT_TYPE, "text/event-stream")
+                    .header("x-request-id", "upstream-test")
+                    .body(Body::from(sse))
+                    .unwrap()
+            }),
+        );
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("ccgpt-debug.jsonl");
+        let diagnostics = Diagnostics::open(Some(&path)).unwrap();
+        let app = app_with_diagnostics(
+            Upstream::direct("secret".into(), upstream(fake).await).unwrap(),
+            ModelRouter::direct(ModelTargets::default()),
+            "test-token",
+            diagnostics,
+        );
+
+        let response = call(
+            app,
+            json!({"model":"claude-opus","messages":[],"stream":true}),
+        )
+        .await;
+        let body = String::from_utf8(
+            to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap()
+                .to_vec(),
+        )
+        .unwrap();
+        assert!(body.contains("event: error"));
+
+        let log = std::fs::read_to_string(path).unwrap();
+        let records = log
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).unwrap())
+            .collect::<Vec<_>>();
+        let failure = records
+            .iter()
+            .find(|record| record["event"] == "upstream_stream_failed")
+            .unwrap();
+        assert_eq!(failure["upstream_request_id"], "upstream-test");
+        assert_eq!(failure["response_id"], "resp_failed");
+        assert_eq!(failure["code"], "server_error");
+        assert_eq!(failure["detail"], "model failed");
+        assert!(failure["request_id"].as_str().is_some());
+        assert!(!log.contains(sensitive_text));
+    }
+
+    #[tokio::test]
+    async fn diagnoses_eof_before_a_terminal_event() {
+        let fake = Router::new().route(
+            "/v1/responses",
+            post(|| async {
+                Response::builder()
+                    .header(header::CONTENT_TYPE, "text/event-stream")
+                    .body(Body::from(
+                        "data: {\"type\":\"response.output_text.delta\",\"output_index\":0,\"delta\":\"partial\"}\n\n",
+                    ))
+                    .unwrap()
+            }),
+        );
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("ccgpt-debug.jsonl");
+        let diagnostics = Diagnostics::open(Some(&path)).unwrap();
+        let app = app_with_diagnostics(
+            Upstream::direct("secret".into(), upstream(fake).await).unwrap(),
+            ModelRouter::direct(ModelTargets::default()),
+            "test-token",
+            diagnostics,
+        );
+
+        let response = call(
+            app,
+            json!({"model":"claude-opus","messages":[],"stream":true}),
+        )
+        .await;
+        let _ = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+
+        let log = std::fs::read_to_string(path).unwrap();
+        let abort = log
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).unwrap())
+            .find(|record| record["event"] == "upstream_stream_aborted")
+            .unwrap();
+        assert_eq!(abort["reason"], "eof_before_terminal");
+        assert!(!log.contains("partial"));
     }
 }

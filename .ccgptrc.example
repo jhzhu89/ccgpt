@@ -1,4 +1,5 @@
 CCGPT_PORT=8000
+# CCGPT_DEBUG_FILE=/absolute/path/to/ccgpt-debug.jsonl
 
 # CCGPT_API_KEY=your-api-key
 # CCGPT_BASE_URL=https://api.openai.com/v1

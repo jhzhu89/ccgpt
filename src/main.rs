@@ -135,6 +135,7 @@ async fn run_claude(args: Vec<OsString>) -> Result<i32, String> {
         .env_remove("ANTHROPIC_FOUNDRY_BASE_URL")
         .env_remove("CLAUDE_CODE_USE_FOUNDRY")
         .env_remove("CCGPT_API_KEY")
+        .env_remove("CCGPT_DEBUG_FILE")
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())

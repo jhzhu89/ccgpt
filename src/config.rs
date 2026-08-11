@@ -5,7 +5,7 @@ use std::{
     fmt,
     fs::File,
     io::{ErrorKind, Read},
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 use crate::models::ModelTargets;
@@ -16,6 +16,7 @@ const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
 pub struct Config {
     pub port: u16,
     pub backend: Backend,
+    pub debug_file: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -90,6 +91,7 @@ impl Config {
             .map_err(|_| ConfigError::new("CCGPT_PORT must be a number from 0 to 65535"))?;
         let api_key = owned_value(&values, "CCGPT_API_KEY");
         let base_url = owned_value(&values, "CCGPT_BASE_URL");
+        let debug_file = owned_value(&values, "CCGPT_DEBUG_FILE").map(PathBuf::from);
 
         let backend = match api_key {
             None => Backend::Copilot,
@@ -109,7 +111,11 @@ impl Config {
             }
         };
 
-        Ok(Self { port, backend })
+        Ok(Self {
+            port,
+            backend,
+            debug_file,
+        })
     }
 }
 
@@ -122,6 +128,7 @@ fn process_environment() -> Result<Vec<(String, String)>, ConfigError> {
         "CCGPT_MODEL_HIGH",
         "CCGPT_MODEL_BALANCED",
         "CCGPT_MODEL_FAST",
+        "CCGPT_DEBUG_FILE",
     ] {
         if let Some(value) = env::var_os(name) {
             let value = value
@@ -197,6 +204,7 @@ mod tests {
 
         assert_eq!(config.port, 8000);
         assert_eq!(config.backend, Backend::Copilot);
+        assert_eq!(config.debug_file, None);
     }
 
     #[test]
@@ -231,11 +239,12 @@ mod tests {
     #[test]
     fn process_environment_overrides_rc_values() {
         let config = Config::from_sources(
-            "CCGPT_API_KEY=rc-key\nCCGPT_PORT=9000\nCCGPT_MODEL_HIGH=rc-sol",
+            "CCGPT_API_KEY=rc-key\nCCGPT_PORT=9000\nCCGPT_MODEL_HIGH=rc-sol\nCCGPT_DEBUG_FILE=rc.jsonl",
             [
                 ("CCGPT_API_KEY", "env-key"),
                 ("CCGPT_PORT", "7000"),
                 ("CCGPT_MODEL_HIGH", "env-sol"),
+                ("CCGPT_DEBUG_FILE", "env.jsonl"),
             ],
         )
         .unwrap();
@@ -249,6 +258,7 @@ mod tests {
         };
         assert_eq!(api_key, "env-key");
         assert_eq!(targets.high, "env-sol");
+        assert_eq!(config.debug_file, Some(PathBuf::from("env.jsonl")));
     }
 
     #[test]

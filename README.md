@@ -99,6 +99,16 @@ The local endpoints are:
 
 To run the gateway manually on port 8000, use `ccgpt`. It prints the bearer token required as `ANTHROPIC_AUTH_TOKEN`. Set `CCGPT_PORT` in `~/.ccgptrc` to choose another port.
 
+### Diagnostic log
+
+Set `CCGPT_DEBUG_FILE` to append structured JSONL diagnostics to a file:
+
+```bash
+CCGPT_DEBUG_FILE=/absolute/path/to/ccgpt-debug.jsonl
+```
+
+The log distinguishes upstream HTTP failures, `response.failed`, incomplete responses, malformed SSE/JSON, and streams that end before a terminal event. Records include ccgpt and upstream request IDs, model routing, terminal status, provider error code/message, and token counts. Request/response content, tool arguments, authorization values, and reasoning payloads are not logged. Provider error messages are preserved for diagnosis and limited to 2,000 characters, so treat the file as potentially sensitive if an upstream service echoes content in an error. Logging is disabled when `CCGPT_DEBUG_FILE` is unset.
+
 ## Develop locally
 
 ```bash

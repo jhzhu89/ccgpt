@@ -15,6 +15,7 @@ const VSCODE_VERSION: &str = "1.131.0";
 const COPILOT_CHAT_VERSION: &str = "0.26.7";
 const CONNECTION_MISMATCH: &str = "input item does not belong to this connection";
 const MODEL_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(30);
+pub(crate) const CCGPT_UPSTREAM_REQUEST_ID_HEADER: &str = "x-ccgpt-upstream-request-id";
 
 #[derive(Clone)]
 pub enum Upstream {
@@ -110,17 +111,18 @@ impl Upstream {
                 api_key,
                 base_url,
             } => {
+                let request_id = Uuid::new_v4().to_string();
                 let response = client
                     .post(endpoint(base_url, "responses"))
                     .bearer_auth(api_key)
                     .header(header::ACCEPT, "application/json")
                     .header(header::CONTENT_TYPE, "application/json")
-                    .header("x-request-id", Uuid::new_v4().to_string())
+                    .header("x-request-id", &request_id)
                     .json(body)
                     .send()
                     .await
-                    .map_err(network_error)?;
-                ensure_success(response).await
+                    .map_err(|error| network_error_with_request_id(error, &request_id))?;
+                ensure_success(tag_request_id(response, &request_id)).await
             }
         }
     }
@@ -234,6 +236,7 @@ async fn send_copilot(
     body: Option<&Value>,
     token: &str,
 ) -> Result<Response, UpstreamError> {
+    let request_id = Uuid::new_v4().to_string();
     let mut request = client
         .request(method, format!("{}{path}", base_url.trim_end_matches('/')))
         .bearer_auth(token)
@@ -253,11 +256,15 @@ async fn send_copilot(
         .header("x-github-api-version", "2025-04-01")
         .header("x-initiator", "agent")
         .header("x-vscode-user-agent-library-version", "electron-fetch")
-        .header("x-request-id", Uuid::new_v4().to_string());
+        .header("x-request-id", &request_id);
     if let Some(body) = body {
         request = request.json(body);
     }
-    request.send().await.map_err(network_error)
+    request
+        .send()
+        .await
+        .map(|response| tag_request_id(response, &request_id))
+        .map_err(|error| network_error_with_request_id(error, &request_id))
 }
 
 fn endpoint(base_url: &str, suffix: &str) -> String {
@@ -269,11 +276,7 @@ async fn ensure_success(response: Response) -> Result<Response, UpstreamError> {
         return Ok(response);
     }
     let status = response.status().as_u16();
-    let request_id = response
-        .headers()
-        .get("x-request-id")
-        .and_then(|value| value.to_str().ok())
-        .map(str::to_owned);
+    let request_id = response_request_id(response.headers());
     let text = response.text().await.unwrap_or_default();
     let message = serde_json::from_str::<Value>(&text)
         .ok()
@@ -305,6 +308,34 @@ fn network_error(error: reqwest::Error) -> UpstreamError {
         message: error.to_string(),
         request_id: None,
     }
+}
+
+fn network_error_with_request_id(error: reqwest::Error, request_id: &str) -> UpstreamError {
+    UpstreamError {
+        status: error.status().map_or(502, |status| status.as_u16()),
+        message: error.to_string(),
+        request_id: Some(request_id.to_owned()),
+    }
+}
+
+fn tag_request_id(mut response: Response, request_id: &str) -> Response {
+    if let Ok(value) = header::HeaderValue::from_str(request_id) {
+        response
+            .headers_mut()
+            .insert(CCGPT_UPSTREAM_REQUEST_ID_HEADER, value);
+    }
+    response
+}
+
+fn response_request_id(headers: &header::HeaderMap) -> Option<String> {
+    ["x-request-id", CCGPT_UPSTREAM_REQUEST_ID_HEADER]
+        .into_iter()
+        .find_map(|name| {
+            headers
+                .get(name)
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_owned)
+        })
 }
 
 fn auth_error(error: impl fmt::Display) -> UpstreamError {
@@ -550,6 +581,7 @@ mod tests {
 
         assert_eq!(error.status, 401);
         assert_eq!(error.message, CONNECTION_MISMATCH);
+        assert!(error.request_id.is_some());
         assert_eq!(attempts.load(Ordering::SeqCst), 1);
     }
 }
