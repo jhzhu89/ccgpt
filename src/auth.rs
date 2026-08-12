@@ -7,6 +7,7 @@ use std::{
     fs::{File, OpenOptions},
     io::{self, Read, Write},
     path::{Path, PathBuf},
+    sync::Arc,
     time::Duration,
 };
 
@@ -51,6 +52,7 @@ pub enum AuthError {
         description: Option<String>,
     },
     TimedOut(&'static str),
+    Shared(Arc<AuthError>),
     Clock,
 }
 
@@ -94,6 +96,7 @@ impl fmt::Display for AuthError {
                 None => write!(formatter, "GitHub authentication failed: {code}"),
             },
             Self::TimedOut(operation) => write!(formatter, "{operation} timed out"),
+            Self::Shared(error) => fmt::Display::fmt(error.as_ref(), formatter),
             Self::Clock => write!(formatter, "system clock is before the Unix epoch"),
         }
     }
@@ -104,6 +107,7 @@ impl Error for AuthError {
         match self {
             Self::Io { source, .. } => Some(source),
             Self::Request { source, .. } => Some(source),
+            Self::Shared(error) => Some(error.as_ref()),
             _ => None,
         }
     }

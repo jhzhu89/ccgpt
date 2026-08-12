@@ -101,7 +101,7 @@ impl Upstream {
                 base_url,
             } => {
                 let token = auth.token().await.map_err(auth_error)?;
-                send_copilot_responses(client, base_url, body, &token, || async {
+                send_copilot_responses(client, base_url, body, token, || async {
                     auth.refresh().await.map_err(auth_error)
                 })
                 .await
@@ -141,13 +141,18 @@ impl Upstream {
         else {
             unreachable!();
         };
-        let token = auth.token().await.map_err(auth_error)?;
-        let response = send_copilot(client, base_url, method.clone(), path, body, &token).await?;
-        if response.status() != StatusCode::UNAUTHORIZED {
-            return Ok(response);
-        }
-        let token = auth.refresh().await.map_err(auth_error)?;
-        send_copilot(client, base_url, method, path, body, &token).await
+        let mut token = auth.token().await.map_err(auth_error)?;
+        let mut refresh = || async { auth.refresh().await.map_err(auth_error) };
+        send_copilot_with_refresh(
+            client,
+            base_url,
+            method,
+            path,
+            body,
+            &mut token,
+            &mut refresh,
+        )
+        .await
     }
 }
 
@@ -155,57 +160,69 @@ async fn send_copilot_responses<F, Fut>(
     client: &Client,
     base_url: &str,
     body: &Value,
-    token: &str,
-    refresh: F,
+    mut token: String,
+    mut refresh: F,
 ) -> Result<Response, UpstreamError>
 where
-    F: FnOnce() -> Fut,
+    F: FnMut() -> Fut,
     Fut: Future<Output = Result<String, UpstreamError>>,
 {
-    let response = send_copilot(
+    let response = send_copilot_with_refresh(
         client,
         base_url,
         Method::POST,
         "/responses",
         Some(body),
-        token,
+        &mut token,
+        &mut refresh,
     )
     .await?;
-    if response.status() != StatusCode::UNAUTHORIZED {
-        return ensure_success(response).await;
-    }
-
     let error = match ensure_success(response).await {
         Ok(response) => return Ok(response),
         Err(error) => error,
     };
-    if is_connection_mismatch(&error) {
-        let Some(body) = without_reasoning(body) else {
-            return Err(error);
-        };
-        let response = send_copilot(
-            client,
-            base_url,
-            Method::POST,
-            "/responses",
-            Some(&body),
-            token,
-        )
-        .await?;
-        return ensure_success(response).await;
+    if !is_connection_mismatch(&error) {
+        return Err(error);
     }
-
-    let token = refresh().await?;
-    let response = send_copilot(
+    let Some(body) = without_reasoning(body) else {
+        return Err(error);
+    };
+    let response = send_copilot_with_refresh(
         client,
         base_url,
         Method::POST,
         "/responses",
-        Some(body),
-        &token,
+        Some(&body),
+        &mut token,
+        &mut refresh,
     )
     .await?;
     ensure_success(response).await
+}
+
+async fn send_copilot_with_refresh<F, Fut>(
+    client: &Client,
+    base_url: &str,
+    method: Method,
+    path: &str,
+    body: Option<&Value>,
+    token: &mut String,
+    refresh: &mut F,
+) -> Result<Response, UpstreamError>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<String, UpstreamError>>,
+{
+    let response = send_copilot(client, base_url, method.clone(), path, body, token).await?;
+    if response.status() != StatusCode::UNAUTHORIZED {
+        return Ok(response);
+    }
+    let refreshed = match refresh().await {
+        Ok(token) => token,
+        Err(_) => return Ok(response),
+    };
+    *token = refreshed;
+    send_copilot(client, base_url, method, path, body, token).await
 }
 
 fn is_connection_mismatch(error: &UpstreamError) -> bool {
@@ -408,24 +425,26 @@ mod tests {
             &client,
             &server(app).await,
             &body,
-            "original",
-            move || async move {
+            "original".into(),
+            move || {
                 refresh_count.fetch_add(1, Ordering::SeqCst);
-                Ok("refreshed".into())
+                async { Ok("refreshed".into()) }
             },
         )
         .await
         .unwrap();
 
         assert_eq!(response.text().await.unwrap(), "recovered");
-        assert_eq!(refreshes.load(Ordering::SeqCst), 0);
+        assert_eq!(refreshes.load(Ordering::SeqCst), 1);
         let attempts = attempts.lock().await;
-        assert_eq!(attempts.len(), 2);
+        assert_eq!(attempts.len(), 3);
         assert_eq!(attempts[0].0, "Bearer original");
-        assert_eq!(attempts[1].0, "Bearer original");
+        assert_eq!(attempts[1].0, "Bearer refreshed");
+        assert_eq!(attempts[2].0, "Bearer refreshed");
         assert_eq!(attempts[0].1["input"].as_array().unwrap().len(), 2);
-        assert_eq!(attempts[1].1["input"].as_array().unwrap().len(), 1);
-        assert_eq!(attempts[1].1["input"][0]["type"], "message");
+        assert_eq!(attempts[1].1, attempts[0].1);
+        assert_eq!(attempts[2].1["input"].as_array().unwrap().len(), 1);
+        assert_eq!(attempts[2].1["input"][0]["type"], "message");
     }
 
     #[tokio::test]
@@ -452,10 +471,10 @@ mod tests {
             &client,
             &server(app).await,
             &json!({"input":[{"type":"message","role":"user","content":"hi"}]}),
-            "original",
-            move || async move {
+            "original".into(),
+            move || {
                 refresh_count.fetch_add(1, Ordering::SeqCst);
-                Ok("refreshed".into())
+                async { Ok("refreshed".into()) }
             },
         )
         .await
@@ -463,8 +482,8 @@ mod tests {
 
         assert_eq!(error.status, 401);
         assert_eq!(error.message, CONNECTION_MISMATCH);
-        assert_eq!(attempts.load(Ordering::SeqCst), 1);
-        assert_eq!(refreshes.load(Ordering::SeqCst), 0);
+        assert_eq!(attempts.load(Ordering::SeqCst), 2);
+        assert_eq!(refreshes.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]
@@ -499,10 +518,10 @@ mod tests {
             &client,
             &server(app).await,
             &body,
-            "original",
-            move || async move {
+            "original".into(),
+            move || {
                 refresh_count.fetch_add(1, Ordering::SeqCst);
-                Ok("refreshed".into())
+                async { Ok("refreshed".into()) }
             },
         )
         .await
@@ -516,6 +535,51 @@ mod tests {
         assert_eq!(attempts[1].0, "Bearer refreshed");
         assert_eq!(attempts[0].1, body);
         assert_eq!(attempts[1].1, body);
+    }
+
+    #[tokio::test]
+    async fn preserves_original_unauthorized_error_when_refresh_fails() {
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let count = attempts.clone();
+        let app = Router::new().route(
+            "/responses",
+            post(move || {
+                count.fetch_add(1, Ordering::SeqCst);
+                async {
+                    (
+                        StatusCode::UNAUTHORIZED,
+                        Json(json!({"error":{"message":"token expired"}})),
+                    )
+                }
+            }),
+        );
+        let refreshes = Arc::new(AtomicUsize::new(0));
+        let refresh_count = refreshes.clone();
+        let client = http_client().unwrap();
+
+        let error = send_copilot_responses(
+            &client,
+            &server(app).await,
+            &json!({"input":[]}),
+            "original".into(),
+            move || {
+                refresh_count.fetch_add(1, Ordering::SeqCst);
+                async {
+                    Err(UpstreamError {
+                        status: 401,
+                        message: "refresh failed".into(),
+                        request_id: None,
+                    })
+                }
+            },
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(error.status, 401);
+        assert_eq!(error.message, "token expired");
+        assert_eq!(attempts.load(Ordering::SeqCst), 1);
+        assert_eq!(refreshes.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]
@@ -542,10 +606,10 @@ mod tests {
             &client,
             &server(app).await,
             &json!({"input":[{"type":"reasoning","encrypted_content":"old"}]}),
-            "original",
-            move || async move {
+            "original".into(),
+            move || {
                 refresh_count.fetch_add(1, Ordering::SeqCst);
-                Ok("refreshed".into())
+                async { Ok("refreshed".into()) }
             },
         )
         .await

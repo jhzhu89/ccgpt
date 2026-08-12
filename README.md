@@ -77,7 +77,7 @@ CCGPT_MODEL_FAST=gpt-5.6-luna
 
 Only `CCGPT_API_KEY` is required. The other values shown are defaults. Generic OpenAI environment variables are intentionally ignored, so an unrelated `OPENAI_API_KEY` cannot silently change the backend.
 
-Remove `CCGPT_API_KEY` to return to GitHub Copilot. Run `ccgpt auth` once to authorize Copilot through GitHub's device flow. The GitHub token is stored at `~/.local/share/ccgpt/github_token`; short-lived Copilot tokens are refreshed automatically.
+Remove `CCGPT_API_KEY` to return to GitHub Copilot. Run `ccgpt auth` once to authorize Copilot through GitHub's device flow. The GitHub token is stored at `~/.local/share/ccgpt/github_token`; short-lived Copilot tokens are refreshed in the background, with one refresh-and-retry after an authentication 401.
 
 ## How it runs
 

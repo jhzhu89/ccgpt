@@ -64,6 +64,7 @@ pub async fn initialize(config: &Config) -> Result<Gateway, String> {
                 let github_token = load_github_token(&path).map_err(|error| error.to_string())?;
                 let auth = CopilotTokenProvider::new(http_client()?, github_token)
                     .map_err(|error| error.to_string())?;
+                auth.initialize().await.map_err(|error| error.to_string())?;
                 let upstream = Upstream::copilot(auth)?;
                 let catalog = upstream.models().await.map_err(|error| error.to_string())?;
                 let models = ModelRouter::copilot(catalog).map_err(|error| error.to_string())?;
