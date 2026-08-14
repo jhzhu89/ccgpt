@@ -56,11 +56,7 @@ fn powershell_profiles() -> Result<Vec<PathBuf>, String> {
 
 fn install_posix(home: &Path, data: &Path) -> Result<Vec<PathBuf>, String> {
     let integration = data.join("shell.sh");
-    fs::write(
-        &integration,
-        "claude() {\n  command ccgpt run \"$@\"\n}\n",
-    )
-    .map_err(io_error)?;
+    fs::write(&integration, "claude() {\n  command ccgpt run \"$@\"\n}\n").map_err(io_error)?;
     let shell = env::var("SHELL").unwrap_or_default();
     let profile = if shell.ends_with("zsh") {
         home.join(".zshrc")

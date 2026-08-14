@@ -446,6 +446,10 @@ impl StreamTranslator {
         }
         self.close_all(frames);
         let usage = event.pointer("/response/usage").unwrap_or(&Value::Null);
+        let input_tokens = usage
+            .get("input_tokens")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
         let output_tokens = usage
             .get("output_tokens")
             .and_then(Value::as_u64)
@@ -471,7 +475,7 @@ impl StreamTranslator {
                 "delta": {
                     "stop_reason": stop_reason
                 },
-                "usage": message_delta_usage(output_tokens)
+                "usage": message_delta_usage(input_tokens, output_tokens)
             }),
         ));
         frames.push(frame("message_stop", json!({ "type": "message_stop" })));
@@ -643,14 +647,20 @@ mod tests {
 
         let terminal = stream.push(&json!({
             "type": "response.completed",
-            "response": { "usage": { "output_tokens": 17 }, "output": [] }
+            "response": {
+                "usage": { "input_tokens": 41, "output_tokens": 17 },
+                "output": []
+            }
         }));
         assert_eq!(event_name(&terminal[0]), "message_delta");
         assert_eq!(
             data(&terminal[0])["delta"],
             json!({ "stop_reason": "tool_use" })
         );
-        assert_eq!(data(&terminal[0])["usage"], json!({ "output_tokens": 17 }));
+        assert_eq!(
+            data(&terminal[0])["usage"],
+            json!({ "input_tokens": 41, "output_tokens": 17 })
+        );
         assert_eq!(event_name(&terminal[1]), "message_stop");
     }
 
@@ -833,11 +843,12 @@ mod tests {
 
         let frames = stream.push(&json!({
             "type": "response.incomplete",
-            "response": { "usage": { "output_tokens": 9 } }
+            "response": { "usage": { "input_tokens": 23, "output_tokens": 9 } }
         }));
         assert_eq!(event_name(&frames[0]), "content_block_stop");
         assert_eq!(event_name(&frames[1]), "message_delta");
         assert_eq!(data(&frames[1])["delta"]["stop_reason"], "max_tokens");
+        assert_eq!(data(&frames[1])["usage"]["input_tokens"], 23);
         assert_eq!(data(&frames[1])["usage"]["output_tokens"], 9);
         assert_eq!(event_name(&frames[2]), "message_stop");
         assert!(

@@ -60,6 +60,18 @@ pub fn build_responses_request(request: &Request, options: BuildOptions<'_>) -> 
     Value::Object(body)
 }
 
+pub(crate) fn build_token_count_payload(request: &Request) -> Value {
+    let mut payload =
+        Map::from_iter([("input".into(), Value::Array(build_input(&request.messages)))]);
+    if !request.tools.is_empty() {
+        payload.insert(
+            "tools".into(),
+            Value::Array(request.tools.iter().map(tool_json).collect()),
+        );
+    }
+    Value::Object(payload)
+}
+
 fn select_effort(
     requested: Option<ReasoningEffort>,
     supported: &[ReasoningEffort],

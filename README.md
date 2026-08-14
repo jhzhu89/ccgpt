@@ -63,6 +63,8 @@ Copilot accepts an exact model only when its model catalog advertises that ID. A
 
 With Copilot, Claude Code's requested reasoning effort is matched to the closest effort advertised by the selected model. Extended-thinking budgets map to low, medium, or high. Parallel tool calls are enabled only when the model advertises support and Claude Code has not disabled them. API-key backends are expected to expose current GPT Responses capabilities and receive these settings directly.
 
+See [Configuration and model limits](docs/configuration.md) for configuration precedence, live Copilot limits, automatic compact behavior, and token-accounting semantics.
+
 ## API-key backend
 
 Create `~/.ccgptrc`:

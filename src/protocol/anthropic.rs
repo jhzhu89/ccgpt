@@ -345,8 +345,11 @@ pub(super) fn message_usage(input_tokens: u64, output_tokens: u64) -> Value {
     })
 }
 
-pub(super) fn message_delta_usage(output_tokens: u64) -> Value {
-    json!({ "output_tokens": output_tokens })
+pub(super) fn message_delta_usage(input_tokens: u64, output_tokens: u64) -> Value {
+    json!({
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens
+    })
 }
 
 pub fn anthropic_error(error_type: &str, message: impl Into<String>) -> Value {

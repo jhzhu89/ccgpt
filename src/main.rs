@@ -10,6 +10,9 @@ use ccgpt::gateway::{Gateway, initialize};
 use tokio::net::TcpListener;
 use tokio::process::Command;
 
+const CLAUDE_AUTOCOMPACT_MIN: u64 = 100_000;
+const CLAUDE_AUTOCOMPACT_MAX: u64 = 1_000_000;
+
 #[tokio::main]
 async fn main() {
     let code = match run().await {
@@ -118,6 +121,7 @@ async fn run_claude(args: Vec<OsString>) -> Result<i32, String> {
         .local_addr()
         .map_err(|error| error.to_string())?
         .port();
+    let args = claude_args(args, gateway.auto_compact_tokens);
     let Gateway {
         app, auth_token, ..
     } = gateway;
@@ -159,6 +163,26 @@ async fn run_claude(args: Vec<OsString>) -> Result<i32, String> {
     Ok(exit_code(status))
 }
 
+fn claude_args(args: Vec<OsString>, max_prompt_tokens: Option<u64>) -> Vec<OsString> {
+    let Some(limit) = max_prompt_tokens else {
+        return args;
+    };
+    if args.iter().any(|argument| {
+        argument == "--autocompact" || argument.to_string_lossy().starts_with("--autocompact=")
+    }) {
+        return args;
+    }
+    if limit < CLAUDE_AUTOCOMPACT_MIN {
+        return args;
+    }
+    let limit = limit.min(CLAUDE_AUTOCOMPACT_MAX);
+    let mut configured = Vec::with_capacity(args.len() + 2);
+    configured.push("--autocompact".into());
+    configured.push(limit.to_string().into());
+    configured.extend(args);
+    configured
+}
+
 fn exit_code(status: ExitStatus) -> i32 {
     #[cfg(unix)]
     {
@@ -181,14 +205,58 @@ fn print_help() {
     );
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod tests {
-    use std::os::unix::process::ExitStatusExt;
+    use std::ffi::OsString;
 
-    use super::exit_code;
+    use super::claude_args;
 
     #[test]
+    fn injects_the_catalog_prompt_limit() {
+        assert_eq!(
+            claude_args(vec!["-p".into(), "hello".into()], Some(922_000)),
+            vec![
+                OsString::from("--autocompact"),
+                OsString::from("922000"),
+                OsString::from("-p"),
+                OsString::from("hello")
+            ]
+        );
+    }
+
+    #[test]
+    fn preserves_explicit_autocompact_arguments() {
+        let split = vec!["--autocompact".into(), "auto".into()];
+        assert_eq!(claude_args(split.clone(), Some(922_000)), split);
+
+        let joined = vec!["--autocompact=500000".into()];
+        assert_eq!(claude_args(joined.clone(), Some(922_000)), joined);
+    }
+
+    #[test]
+    fn skips_unknown_or_unsupported_limits() {
+        let args = vec![OsString::from("--version")];
+        assert_eq!(claude_args(args.clone(), None), args);
+
+        let args = vec![OsString::from("--version")];
+        assert_eq!(claude_args(args.clone(), Some(99_999)), args);
+    }
+
+    #[test]
+    fn caps_catalog_limits_at_the_claude_cli_maximum() {
+        assert_eq!(
+            claude_args(Vec::new(), Some(1_050_000)),
+            vec![OsString::from("--autocompact"), OsString::from("1000000")]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn maps_signal_to_shell_exit_code() {
+        use std::os::unix::process::ExitStatusExt;
+
+        use super::exit_code;
+
         assert_eq!(exit_code(std::process::ExitStatus::from_raw(15)), 143);
     }
 }

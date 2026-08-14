@@ -42,6 +42,7 @@ pub struct Gateway {
     pub backend: &'static str,
     pub targets: ModelTargets,
     pub auth_token: String,
+    pub auto_compact_tokens: Option<u64>,
 }
 
 pub async fn initialize(config: &Config) -> Result<Gateway, String> {
@@ -96,6 +97,7 @@ pub async fn initialize(config: &Config) -> Result<Gateway, String> {
         }
     };
     let targets = models.targets.clone();
+    let auto_compact_tokens = models.auto_compact_tokens();
     let auth_token = Uuid::new_v4().simple().to_string();
     diagnostics.record(
         "gateway_started",
@@ -106,7 +108,8 @@ pub async fn initialize(config: &Config) -> Result<Gateway, String> {
                 "high": targets.high,
                 "balanced": targets.balanced,
                 "fast": targets.fast
-            }
+            },
+            "auto_compact_tokens": auto_compact_tokens
         }),
     );
     Ok(Gateway {
@@ -114,6 +117,7 @@ pub async fn initialize(config: &Config) -> Result<Gateway, String> {
         backend,
         targets,
         auth_token,
+        auto_compact_tokens,
     })
 }
 
@@ -199,6 +203,31 @@ async fn messages(State(state): State<AppState>, headers: HeaderMap, body: Bytes
             );
         }
     };
+    if let (Some(requested), Some(limit)) = (
+        request.max_output_tokens,
+        resolved.capabilities.limits.max_output_tokens,
+    ) && requested > limit
+    {
+        let message = format!(
+            "max_tokens {requested} exceeds the {limit} token output limit for {}",
+            resolved.model
+        );
+        state.diagnostics.record(
+            "request_rejected",
+            json!({
+                "request_id": request_id,
+                "reason": "max_output_tokens",
+                "requested_model": request.model,
+                "resolved_model": resolved.model,
+                "requested_max_output_tokens": requested,
+                "max_output_tokens": limit
+            }),
+        );
+        return with_request_id(
+            error_response(400, "invalid_request_error", message),
+            &request_id,
+        );
+    }
     state.diagnostics.record(
         "request_started",
         json!({
@@ -582,6 +611,8 @@ mod tests {
     use tokio::sync::Mutex;
     use tower::ServiceExt;
 
+    use crate::models::{CopilotCapabilities, CopilotModel, CopilotSupports, ModelLimits};
+
     use super::*;
 
     async fn upstream(app: Router) -> String {
@@ -597,6 +628,22 @@ mod tests {
             ModelRouter::direct(ModelTargets::default()),
             "test-token",
         )
+    }
+
+    fn limited_copilot_router() -> ModelRouter {
+        ModelRouter::copilot(["sol", "terra", "luna"].map(|tier| CopilotModel {
+            id: format!("gpt-5.6-{tier}"),
+            supported_endpoints: vec!["/responses".into()],
+            capabilities: CopilotCapabilities {
+                supports: CopilotSupports::default(),
+                limits: ModelLimits {
+                    max_context_window_tokens: Some(1_050_000),
+                    max_prompt_tokens: Some(922_000),
+                    max_output_tokens: Some(128_000),
+                },
+            },
+        }))
+        .unwrap()
     }
 
     async fn call(app: Router, body: Value) -> Response {
@@ -726,6 +773,41 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn rejects_output_larger_than_the_catalog_limit() {
+        let fake = Router::new().route(
+            "/v1/responses",
+            post(|| async { StatusCode::INTERNAL_SERVER_ERROR }),
+        );
+        let app = app(
+            Upstream::direct("secret".into(), upstream(fake).await).unwrap(),
+            limited_copilot_router(),
+            "test-token",
+        );
+
+        let response = call(
+            app,
+            json!({
+                "model": "claude-opus",
+                "messages": [],
+                "max_tokens": 128001
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(body["error"]["type"], "invalid_request_error");
+        assert!(
+            body["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("128000")
+        );
+    }
+
+    #[tokio::test]
     async fn parses_fragmented_sse_and_interleaved_tools() {
         let sse = concat!(
             "event: response.created\r\n",
@@ -738,7 +820,7 @@ mod tests {
             "data: {\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"item_a\",\"delta\":\"1}\"}\n\n",
             "data: {\"type\":\"response.function_call_arguments.done\",\"item_id\":\"item_a\"}\n\n",
             "data: {\"type\":\"response.function_call_arguments.done\",\"item_id\":\"item_b\"}\n\n",
-            "data: {\"type\":\"response.completed\",\"response\":{\"output\":[],\"usage\":{\"output_tokens\":8}}}\n\n"
+            "data: {\"type\":\"response.completed\",\"response\":{\"output\":[],\"usage\":{\"input_tokens\":21,\"output_tokens\":8}}}\n\n"
         );
         let chunks = [&sse[..17], &sse[17..91], &sse[91..219], &sse[219..]]
             .into_iter()
@@ -770,6 +852,8 @@ mod tests {
         assert!(body.contains("\"index\":0"));
         assert!(body.contains("\"index\":1"));
         assert!(body.contains("\"stop_reason\":\"tool_use\""));
+        assert!(body.contains("\"input_tokens\":21"));
+        assert!(body.contains("\"output_tokens\":8"));
         assert!(body.contains("event: message_stop"));
         assert!(!body.contains("event: error"));
     }

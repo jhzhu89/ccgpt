@@ -58,10 +58,11 @@ impl Default for ModelTargets {
 pub struct ModelCapabilities {
     pub supports_parallel_tool_calls: bool,
     pub reasoning_efforts: Vec<ReasoningEffort>,
+    pub limits: ModelLimits,
 }
 
 impl ModelCapabilities {
-    fn direct() -> Self {
+    fn direct(model: &str) -> Self {
         Self {
             supports_parallel_tool_calls: true,
             reasoning_efforts: vec![
@@ -72,6 +73,46 @@ impl ModelCapabilities {
                 ReasoningEffort::Xhigh,
                 ReasoningEffort::Max,
             ],
+            limits: ModelLimits::known(model),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+pub struct ModelLimits {
+    pub max_context_window_tokens: Option<u64>,
+    pub max_prompt_tokens: Option<u64>,
+    pub max_output_tokens: Option<u64>,
+}
+
+impl ModelLimits {
+    fn known(model: &str) -> Self {
+        let model = model.to_ascii_lowercase();
+        let Some(variant) = model.strip_prefix("gpt-5.6-") else {
+            return Self::default();
+        };
+        if !["sol", "terra", "luna"].iter().any(|tier| {
+            variant == *tier
+                || variant
+                    .strip_prefix(tier)
+                    .is_some_and(|suffix| suffix.starts_with('-'))
+        }) {
+            return Self::default();
+        }
+        Self {
+            max_context_window_tokens: Some(1_050_000),
+            max_prompt_tokens: Some(922_000),
+            max_output_tokens: Some(128_000),
+        }
+    }
+
+    fn with_fallback(self, fallback: Self) -> Self {
+        Self {
+            max_context_window_tokens: self
+                .max_context_window_tokens
+                .or(fallback.max_context_window_tokens),
+            max_prompt_tokens: self.max_prompt_tokens.or(fallback.max_prompt_tokens),
+            max_output_tokens: self.max_output_tokens.or(fallback.max_output_tokens),
         }
     }
 }
@@ -89,6 +130,8 @@ pub struct CopilotModel {
 pub struct CopilotCapabilities {
     #[serde(default)]
     pub supports: CopilotSupports,
+    #[serde(default)]
+    pub limits: ModelLimits,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
@@ -110,6 +153,10 @@ impl CopilotModel {
                 .iter()
                 .filter_map(|effort| parse_reasoning_effort(effort))
                 .collect(),
+            limits: self
+                .capabilities
+                .limits
+                .with_fallback(ModelLimits::known(&self.id)),
         }
     }
 
@@ -223,10 +270,31 @@ impl ModelRouter {
                 };
                 Ok(ResolvedModel {
                     model: model.to_owned(),
-                    capabilities: ModelCapabilities::direct(),
+                    capabilities: ModelCapabilities::direct(model),
                 })
             }
         }
+    }
+
+    pub fn auto_compact_tokens(&self) -> Option<u64> {
+        let limits = match &self.routing {
+            Routing::Copilot { tiers, .. } => [
+                tiers.get(&ModelTier::High)?.capabilities.limits,
+                tiers.get(&ModelTier::Balanced)?.capabilities.limits,
+                tiers.get(&ModelTier::Fast)?.capabilities.limits,
+            ],
+            Routing::Direct => [
+                ModelLimits::known(&self.targets.high),
+                ModelLimits::known(&self.targets.balanced),
+                ModelLimits::known(&self.targets.fast),
+            ],
+        };
+        limits
+            .into_iter()
+            .map(|limits| limits.max_prompt_tokens)
+            .collect::<Option<Vec<_>>>()?
+            .into_iter()
+            .min()
     }
 }
 
@@ -345,6 +413,11 @@ mod tests {
                         "max".to_owned(),
                     ],
                 },
+                limits: ModelLimits {
+                    max_context_window_tokens: Some(1_050_000),
+                    max_prompt_tokens: Some(922_000),
+                    max_output_tokens: Some(128_000),
+                },
             },
         }
     }
@@ -441,6 +514,11 @@ mod tests {
                 ReasoningEffort::Max
             ]
         );
+        assert_eq!(
+            resolved.capabilities.limits.max_prompt_tokens,
+            Some(922_000)
+        );
+        assert_eq!(router.auto_compact_tokens(), Some(922_000));
     }
 
     #[test]
@@ -483,6 +561,93 @@ mod tests {
                 .capabilities
                 .reasoning_efforts
                 .contains(&ReasoningEffort::Minimal)
+        );
+        assert_eq!(
+            router.resolve("gpt-5.6-sol").unwrap().capabilities.limits,
+            ModelLimits {
+                max_context_window_tokens: Some(1_050_000),
+                max_prompt_tokens: Some(922_000),
+                max_output_tokens: Some(128_000),
+            }
+        );
+        assert_eq!(router.auto_compact_tokens(), Some(922_000));
+    }
+
+    #[test]
+    fn unknown_direct_models_do_not_get_guessed_limits() {
+        let router = ModelRouter::direct(ModelTargets {
+            high: "custom-high".into(),
+            balanced: "custom-balanced".into(),
+            fast: "custom-fast".into(),
+        });
+
+        assert_eq!(router.auto_compact_tokens(), None);
+        assert_eq!(
+            router.resolve("custom-high").unwrap().capabilities.limits,
+            ModelLimits::default()
+        );
+    }
+
+    #[test]
+    fn deserializes_copilot_model_limits() {
+        let model: CopilotModel = serde_json::from_value(serde_json::json!({
+            "id": "gpt-5.6-sol",
+            "supported_endpoints": ["/responses"],
+            "capabilities": {
+                "limits": {
+                    "max_context_window_tokens": 1050000,
+                    "max_prompt_tokens": 922000,
+                    "max_output_tokens": 128000
+                }
+            }
+        }))
+        .unwrap();
+
+        assert_eq!(
+            model.capabilities.limits,
+            ModelLimits {
+                max_context_window_tokens: Some(1_050_000),
+                max_prompt_tokens: Some(922_000),
+                max_output_tokens: Some(128_000),
+            }
+        );
+    }
+
+    #[test]
+    fn auto_compact_uses_the_lowest_selected_prompt_limit() {
+        let mut models = catalog();
+        models
+            .iter_mut()
+            .find(|model| model.id == "gpt-5.10-terra")
+            .unwrap()
+            .capabilities
+            .limits
+            .max_prompt_tokens = Some(900_000);
+
+        let router = ModelRouter::copilot(models).unwrap();
+
+        assert_eq!(router.auto_compact_tokens(), Some(900_000));
+    }
+
+    #[test]
+    fn known_limits_fill_missing_copilot_catalog_fields() {
+        let models = ["sol", "terra", "luna"].map(|tier| {
+            let mut model = model(&format!("gpt-5.6-{tier}"));
+            model.capabilities.limits = ModelLimits::default();
+            model
+        });
+
+        let router = ModelRouter::copilot(models).unwrap();
+
+        assert_eq!(router.auto_compact_tokens(), Some(922_000));
+        assert_eq!(
+            router
+                .resolve("gpt-5.6-sol")
+                .unwrap()
+                .capabilities
+                .limits
+                .max_output_tokens,
+            Some(128_000)
         );
     }
 }
