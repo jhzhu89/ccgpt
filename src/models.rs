@@ -54,6 +54,23 @@ impl Default for ModelTargets {
     }
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ModelTargetOverrides {
+    pub high: Option<String>,
+    pub balanced: Option<String>,
+    pub fast: Option<String>,
+}
+
+impl ModelTargetOverrides {
+    fn get(&self, tier: ModelTier) -> Option<&str> {
+        match tier {
+            ModelTier::High => self.high.as_deref(),
+            ModelTier::Balanced => self.balanced.as_deref(),
+            ModelTier::Fast => self.fast.as_deref(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelCapabilities {
     pub supports_parallel_tool_calls: bool,
@@ -212,13 +229,26 @@ pub struct ModelRouter {
 
 impl ModelRouter {
     pub fn copilot(models: impl IntoIterator<Item = CopilotModel>) -> Result<Self, ModelError> {
+        Self::copilot_with_overrides(models, ModelTargetOverrides::default())
+    }
+
+    pub fn copilot_with_overrides(
+        models: impl IntoIterator<Item = CopilotModel>,
+        overrides: ModelTargetOverrides,
+    ) -> Result<Self, ModelError> {
         let models: Vec<_> = models
             .into_iter()
             .filter(CopilotModel::supports_responses)
             .collect();
         let mut tiers = HashMap::new();
         for tier in [ModelTier::High, ModelTier::Balanced, ModelTier::Fast] {
-            let selected = select_latest(&models, tier).ok_or(ModelError::MissingTier(tier))?;
+            let selected = match overrides.get(tier) {
+                Some(target) => models
+                    .iter()
+                    .find(|model| model.id.eq_ignore_ascii_case(target))
+                    .ok_or_else(|| ModelError::Unavailable(target.to_owned()))?,
+                None => select_latest(&models, tier).ok_or(ModelError::MissingTier(tier))?,
+            };
             tiers.insert(tier, resolve_copilot_model(selected));
         }
         let targets = ModelTargets {
@@ -450,6 +480,48 @@ mod tests {
         let router = ModelRouter::copilot(models).unwrap();
 
         assert_eq!(router.targets.high, "gpt-5.10-sol");
+    }
+
+    #[test]
+    fn copilot_override_selects_an_exact_catalog_model() {
+        let mut models = catalog();
+        models.push(model("gpt-5.10-sol"));
+        models.push(model("gpt-5.10-sol-fast"));
+
+        let router = ModelRouter::copilot_with_overrides(
+            models,
+            ModelTargetOverrides {
+                high: Some("GPT-5.10-SOL-FAST".to_owned()),
+                balanced: Some("gpt-5.9-terra".to_owned()),
+                fast: None,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(router.targets.high, "gpt-5.10-sol-fast");
+        assert_eq!(router.targets.balanced, "gpt-5.9-terra");
+        assert_eq!(router.targets.fast, "gpt-5.10-luna");
+    }
+
+    #[test]
+    fn copilot_override_rejects_models_outside_the_responses_catalog() {
+        let mut models = catalog();
+        let mut unsupported = model("gpt-5.10-sol-private");
+        unsupported.supported_endpoints = vec!["/chat/completions".to_owned()];
+        models.push(unsupported);
+
+        for target in ["gpt-5.10-sol-private", "gpt-5.10-sol-missing"] {
+            let error = ModelRouter::copilot_with_overrides(
+                models.clone(),
+                ModelTargetOverrides {
+                    high: Some(target.to_owned()),
+                    ..ModelTargetOverrides::default()
+                },
+            )
+            .unwrap_err();
+
+            assert_eq!(error, ModelError::Unavailable(target.to_owned()));
+        }
     }
 
     #[test]

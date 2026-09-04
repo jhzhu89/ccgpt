@@ -61,6 +61,14 @@ claude --model gpt-5.6-sol
 
 Copilot accepts an exact model only when its model catalog advertises that ID. API-key backends pass non-Claude model IDs through unchanged.
 
+To override a Copilot tier, set the corresponding target in `~/.ccgptrc`. Unspecified tiers continue to use automatic catalog selection:
+
+```bash
+CCGPT_MODEL_HIGH=gpt-5.6-sol-fast
+```
+
+The configured model must be advertised by the live Copilot catalog and support the Responses endpoint, otherwise startup fails with a clear unavailable-model error.
+
 With Copilot, Claude Code's requested reasoning effort is matched to the closest effort advertised by the selected model. Extended-thinking budgets map to low, medium, or high. Parallel tool calls are enabled only when the model advertises support and Claude Code has not disabled them. API-key backends are expected to expose current GPT Responses capabilities and receive these settings directly.
 
 See [Configuration and model limits](docs/configuration.md) for configuration precedence, live Copilot limits, automatic compact behavior, and token-accounting semantics.

@@ -10,9 +10,9 @@ ccgpt reads `~/.ccgptrc`, then applies any `CCGPT_*` process environment variabl
 | --- | --- | --- |
 | `CCGPT_API_KEY` | unset | Selects the direct API backend when present; otherwise ccgpt uses Copilot. |
 | `CCGPT_BASE_URL` | `https://api.openai.com/v1` | Base URL for the direct Responses API backend. |
-| `CCGPT_MODEL_HIGH` | `gpt-5.6-sol` | Direct-backend target for Opus, Fable, Mythos, default, and unknown Claude model names. |
-| `CCGPT_MODEL_BALANCED` | `gpt-5.6-terra` | Direct-backend target for Sonnet. |
-| `CCGPT_MODEL_FAST` | `gpt-5.6-luna` | Direct-backend target for Haiku. |
+| `CCGPT_MODEL_HIGH` | automatic for Copilot; `gpt-5.6-sol` for direct | Target for Opus, Fable, Mythos, default, and unknown Claude model names. |
+| `CCGPT_MODEL_BALANCED` | automatic for Copilot; `gpt-5.6-terra` for direct | Target for Sonnet. |
+| `CCGPT_MODEL_FAST` | automatic for Copilot; `gpt-5.6-luna` for direct | Target for Haiku. |
 | `CCGPT_PORT` | `8000` | Port used when the gateway is started manually. `ccgpt run` uses a free random loopback port. |
 | `CCGPT_DEBUG_FILE` | unset | Absolute path for structured JSONL diagnostics. |
 
@@ -27,6 +27,8 @@ The Copilot backend fetches the live `/models` catalog at startup. ccgpt selects
 - maximum context-window tokens;
 - maximum prompt tokens;
 - maximum output tokens.
+
+An explicitly configured `CCGPT_MODEL_HIGH`, `CCGPT_MODEL_BALANCED`, or `CCGPT_MODEL_FAST` replaces automatic selection for that tier. The configured ID is matched case-insensitively against the live Responses-capable catalog. Startup fails if the model is unavailable; ccgpt does not silently fall back to another model. Unspecified tiers remain automatic.
 
 These values are runtime data, not permanent constants. For example, the GPT-5.6 entries observed on 2026-08-14 advertised:
 

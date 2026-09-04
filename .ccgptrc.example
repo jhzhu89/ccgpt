@@ -1,8 +1,10 @@
 CCGPT_PORT=8000
 # CCGPT_DEBUG_FILE=/absolute/path/to/ccgpt-debug.jsonl
 
-# CCGPT_API_KEY=your-api-key
-# CCGPT_BASE_URL=https://api.openai.com/v1
-# CCGPT_MODEL_HIGH=gpt-5.6-sol
+# Optional tier overrides. Copilot requires each configured model in its live catalog.
+# CCGPT_MODEL_HIGH=gpt-5.6-sol-fast
 # CCGPT_MODEL_BALANCED=gpt-5.6-terra
 # CCGPT_MODEL_FAST=gpt-5.6-luna
+
+# CCGPT_API_KEY=your-api-key
+# CCGPT_BASE_URL=https://api.openai.com/v1

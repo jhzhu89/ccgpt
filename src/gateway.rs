@@ -68,7 +68,9 @@ pub async fn initialize(config: &Config) -> Result<Gateway, String> {
                 auth.initialize().await.map_err(|error| error.to_string())?;
                 let upstream = Upstream::copilot(auth)?;
                 let catalog = upstream.models().await.map_err(|error| error.to_string())?;
-                let models = ModelRouter::copilot(catalog).map_err(|error| error.to_string())?;
+                let models =
+                    ModelRouter::copilot_with_overrides(catalog, config.model_overrides.clone())
+                        .map_err(|error| error.to_string())?;
                 (upstream, models, "copilot")
             }
             Backend::Direct {

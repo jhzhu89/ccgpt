@@ -8,7 +8,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::models::ModelTargets;
+use crate::models::{ModelTargetOverrides, ModelTargets};
 
 const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
 
@@ -16,6 +16,7 @@ const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
 pub struct Config {
     pub port: u16,
     pub backend: Backend,
+    pub model_overrides: ModelTargetOverrides,
     pub debug_file: Option<PathBuf>,
 }
 
@@ -92,6 +93,11 @@ impl Config {
         let api_key = owned_value(&values, "CCGPT_API_KEY");
         let base_url = owned_value(&values, "CCGPT_BASE_URL");
         let debug_file = owned_value(&values, "CCGPT_DEBUG_FILE").map(PathBuf::from);
+        let model_overrides = ModelTargetOverrides {
+            high: owned_value(&values, "CCGPT_MODEL_HIGH"),
+            balanced: owned_value(&values, "CCGPT_MODEL_BALANCED"),
+            fast: owned_value(&values, "CCGPT_MODEL_FAST"),
+        };
 
         let backend = match api_key {
             None => Backend::Copilot,
@@ -102,10 +108,12 @@ impl Config {
                     api_key,
                     base_url,
                     targets: ModelTargets {
-                        high: owned_value(&values, "CCGPT_MODEL_HIGH").unwrap_or(defaults.high),
-                        balanced: owned_value(&values, "CCGPT_MODEL_BALANCED")
+                        high: model_overrides.high.clone().unwrap_or(defaults.high),
+                        balanced: model_overrides
+                            .balanced
+                            .clone()
                             .unwrap_or(defaults.balanced),
-                        fast: owned_value(&values, "CCGPT_MODEL_FAST").unwrap_or(defaults.fast),
+                        fast: model_overrides.fast.clone().unwrap_or(defaults.fast),
                     },
                 }
             }
@@ -114,6 +122,7 @@ impl Config {
         Ok(Self {
             port,
             backend,
+            model_overrides,
             debug_file,
         })
     }
@@ -205,6 +214,23 @@ mod tests {
         assert_eq!(config.port, 8000);
         assert_eq!(config.backend, Backend::Copilot);
         assert_eq!(config.debug_file, None);
+    }
+
+    #[test]
+    fn loads_copilot_model_overrides() {
+        let config = Config::from_sources(
+            "CCGPT_MODEL_HIGH=gpt-5.6-sol-fast",
+            Vec::<(String, String)>::new(),
+        )
+        .unwrap();
+
+        assert_eq!(config.backend, Backend::Copilot);
+        assert_eq!(
+            config.model_overrides.high.as_deref(),
+            Some("gpt-5.6-sol-fast")
+        );
+        assert_eq!(config.model_overrides.balanced, None);
+        assert_eq!(config.model_overrides.fast, None);
     }
 
     #[test]
