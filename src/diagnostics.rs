@@ -90,7 +90,7 @@ fn open_file(path: &Path) -> Result<File, std::io::Error> {
         options.mode(0o600);
         let file = options.open(path)?;
         file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
-        return Ok(file);
+        Ok(file)
     }
     #[cfg(not(unix))]
     return options.open(path);
